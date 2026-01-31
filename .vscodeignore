@@ -1,0 +1,14 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.yarnrc
+vsc-extension-quickstart.md
+**/*.map
+**/*.ts
+combined_files.md
+files_tree.md
+task.md
+system_info.md
+examples/**
+var/**
