@@ -21,7 +21,7 @@ export function activate(context: vscode.ExtensionContext) {
   const statusBar = new StatusBar();
 
   // Initialize Commands
-  registerCommands(context, watcher, configManager);
+  registerCommands(context, watcher, configManager, workspaceRoot);
 
   // Auto-start watching for config changes
   configManager.startWatching();
