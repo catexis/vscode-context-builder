@@ -9,13 +9,41 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:.vscode/context-config.json"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "context-builder.helloWorld",
-        "title": "Hello World"
+        "command": "context-builder.initConfig",
+        "title": "Init Configuration",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.selectProfile",
+        "title": "Select Profile",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.startWatching",
+        "title": "Start Watching",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.stopWatching",
+        "title": "Stop Watching",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.buildOnce",
+        "title": "Build Once",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.copyOutputPath",
+        "title": "Copy Output Path",
+        "category": "Context Builder"
       }
     ]
   },
