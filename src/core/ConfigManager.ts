@@ -107,7 +107,6 @@ export class ConfigManager implements vscode.Disposable {
         this._onConfigChanged.fire(config);
       } catch (error) {
         this._onConfigChanged.fire(null);
-        // We don't show the UI error on every key press, we log it to the console or output channel
         console.error(`Context Builder Config Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     };
@@ -128,51 +127,64 @@ export class ConfigManager implements vscode.Disposable {
     this._onConfigChanged.dispose();
   }
 
-  private validate(config: any): config is ContextConfig {
+  private validate(config: unknown): config is ContextConfig {
     if (!config || typeof config !== 'object') return false;
 
+    // Safe cast to access properties for check
+    const c = config as Record<string, unknown>;
+
     // Validate globalSettings
-    if (!config.globalSettings || typeof config.globalSettings !== 'object') return false;
-    const { debounceMs, maxFileSizeKB, maxTotalFiles, tokenizerModel } = config.globalSettings;
+    if (!c.globalSettings || typeof c.globalSettings !== 'object') return false;
+    const gs = c.globalSettings as Record<string, unknown>;
+
     if (
-      typeof debounceMs !== 'number' ||
-      typeof maxFileSizeKB !== 'number' ||
-      typeof maxTotalFiles !== 'number' ||
-      typeof tokenizerModel !== 'string'
+      typeof gs.debounceMs !== 'number' ||
+      typeof gs.maxFileSizeKB !== 'number' ||
+      typeof gs.maxTotalFiles !== 'number' ||
+      typeof gs.tokenizerModel !== 'string'
     ) {
       return false;
     }
 
     // Validate activeProfile
-    if (typeof config.activeProfile !== 'string') return false;
+    if (typeof c.activeProfile !== 'string') return false;
 
     // Validate profiles array
-    if (!Array.isArray(config.profiles)) return false;
-    for (const profile of config.profiles) {
-      if (
-        typeof profile.name !== 'string' ||
-        typeof profile.description !== 'string' ||
-        typeof profile.outputFile !== 'string' ||
-        !Array.isArray(profile.include) ||
-        !Array.isArray(profile.exclude) ||
-        !Array.isArray(profile.forceInclude) ||
-        typeof profile.options !== 'object' ||
-        !this.validateProfileOptions(profile.options) // Deep check
-      ) {
-        return false;
-      }
+    if (!Array.isArray(c.profiles)) return false;
+
+    for (const profile of c.profiles) {
+      if (!this.isProfile(profile)) return false;
     }
 
     return true;
   }
 
-  private validateProfileOptions(options: any): options is ProfileOptions {
+  private isProfile(profile: unknown): profile is Profile {
+    if (!profile || typeof profile !== 'object') return false;
+    const p = profile as Record<string, unknown>;
+
     return (
-      typeof options.useGitIgnore === 'boolean' &&
-      typeof options.removeComments === 'boolean' &&
-      typeof options.showTokenCount === 'boolean' &&
-      typeof options.showFileTree === 'boolean' &&
-      typeof options.preamble === 'string'
+      typeof p.name === 'string' &&
+      typeof p.description === 'string' &&
+      typeof p.outputFile === 'string' &&
+      Array.isArray(p.include) &&
+      Array.isArray(p.exclude) &&
+      Array.isArray(p.forceInclude) &&
+      typeof p.options === 'object' &&
+      this.validateProfileOptions(p.options)
+    );
+  }
+
+  private validateProfileOptions(options: unknown): options is ProfileOptions {
+    if (!options || typeof options !== 'object') return false;
+    const o = options as Record<string, unknown>;
+
+    return (
+      typeof o.useGitIgnore === 'boolean' &&
+      typeof o.removeComments === 'boolean' &&
+      typeof o.showTokenCount === 'boolean' &&
+      typeof o.showFileTree === 'boolean' &&
+      typeof o.preamble === 'string'
     );
   }
 }

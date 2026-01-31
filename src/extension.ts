@@ -1,25 +1,33 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { ConfigManager } from './core/ConfigManager';
+import { Watcher } from './core/Watcher';
+import { registerCommands } from './ui/Commands';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-  // Use the console to output diagnostic information (console.log) and errors (console.error)
-  // This line of code will only be executed once when your extension is activated
-  console.log('Congratulations, your extension "context-builder" is now active!');
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) {
+    return; // Context Builder works only in workspace/folder mode
+  }
 
-  // The command has been defined in the package.json file
-  // Now provide the implementation of the command with registerCommand
-  // The commandId parameter must match the command field in package.json
-  const disposable = vscode.commands.registerCommand('context-builder.helloWorld', () => {
-    // The code you place here will be executed every time your command is executed
-    // Display a message box to the user
-    vscode.window.showInformationMessage('Hello World from Context Builder!');
+  const workspaceRoot = workspaceFolders[0].uri.fsPath;
+
+  // Initialize Core Components
+  const configManager = new ConfigManager(workspaceRoot);
+  const watcher = new Watcher(workspaceRoot, configManager);
+
+  // Initialize UI & Commands
+  registerCommands(context, watcher, configManager);
+
+  // Auto-start watching for config changes
+  configManager.startWatching();
+
+  // Add disposables to context
+  context.subscriptions.push(configManager, watcher);
+
+  // Log status (replace with StatusBar later)
+  watcher.onStateChange((state) => {
+    console.log(`[Context Builder] State changed: ${state}`);
   });
-
-  context.subscriptions.push(disposable);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}

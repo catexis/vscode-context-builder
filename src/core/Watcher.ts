@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs/promises';
+import ignore, { Ignore } from 'ignore';
 import { ConfigManager } from './ConfigManager';
 import { FileResolver } from './FileResolver';
 import { ContextBuilder } from './ContextBuilder';
@@ -10,9 +12,16 @@ import { Profile } from '../types/config';
 export class Watcher implements vscode.Disposable {
   private _state: WatcherState = WatcherState.Idle;
   private activeProfile: Profile | null = null;
+
   private fsWatcher: vscode.FileSystemWatcher | null = null;
+  private gitIgnoreWatcher: vscode.FileSystemWatcher | null = null;
+
   private debounceTimer: NodeJS.Timeout | null = null;
   private lastStats: BuildStats | null = null;
+
+  // Long-lived instances for the active session
+  private tokenCounter: TokenCounter | null = null;
+  private gitIgnoreParser: Ignore | null = null;
 
   private readonly _onStateChange = new vscode.EventEmitter<WatcherState>();
   public readonly onStateChange = this._onStateChange.event;
@@ -24,18 +33,14 @@ export class Watcher implements vscode.Disposable {
     private readonly workspaceRoot: string,
     private readonly configManager: ConfigManager,
   ) {
-    // Listen for config changes to auto-restart or stop
     this.configManager.onDidChangeConfig((config) => {
       if (!config) {
-        // Config became invalid
         this.stop();
         vscode.window.showErrorMessage('Context Builder: Configuration is invalid. Watching stopped.');
         return;
       }
 
-      // If we are running, restart to apply new settings (e.g. debounceMs or exclude patterns)
       if (this.state !== WatcherState.Idle && this.activeProfile) {
-        // Try to keep the same profile active if it still exists
         const stillExists = config.profiles.find((p) => p.name === this.activeProfile?.name);
         if (stillExists) {
           this.start(stillExists.name);
@@ -62,49 +67,65 @@ export class Watcher implements vscode.Disposable {
   }
 
   public async start(profileName: string): Promise<void> {
+    const config = await this.configManager.load();
     const profile = this.configManager.getProfile(profileName);
+
     if (!profile) {
       vscode.window.showErrorMessage(`Profile "${profileName}" not found.`);
       return;
     }
 
-    // Stop existing watcher if any
-    this.stop();
+    this.stop(); // Clean previous state
 
     this.activeProfile = profile;
+
+    // 1. Initialize TokenCounter once per session
+    this.tokenCounter = new TokenCounter(config.globalSettings.tokenizerModel);
+
+    // 2. Initialize GitIgnore handling
+    if (profile.options.useGitIgnore) {
+      await this.loadGitIgnore();
+      this.startGitIgnoreWatcher();
+    }
+
     this.setState(WatcherState.Watching);
 
-    // Create a temporary resolver to get watch patterns correctly (DRY)
-    const config = await this.configManager.load(); // Ensure we have latest settings
-    const resolver = new FileResolver(this.workspaceRoot, profile, config.globalSettings);
+    // 3. Setup File Watcher
+    // Temporarily instantiate FileResolver just to get patterns.
+    // We pass existing gitIgnoreParser to avoid re-reading disk even here.
+    const resolver = new FileResolver(this.workspaceRoot, profile, config.globalSettings, this.gitIgnoreParser);
     const patterns = resolver.getWatchPatterns();
 
-    // Convert patterns array to VS Code GlobPattern: "{src/**/*,README.md}"
     const globPattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(',')}}`;
     const relativePattern = new vscode.RelativePattern(this.workspaceRoot, globPattern);
 
     this.fsWatcher = vscode.workspace.createFileSystemWatcher(relativePattern);
 
-    // Bind events
     const handler = (uri: vscode.Uri) => this.handleFileEvent(uri);
     this.fsWatcher.onDidChange(handler);
     this.fsWatcher.onDidCreate(handler);
     this.fsWatcher.onDidDelete(handler);
 
-    // Initial build on start
+    // Initial build
     this.triggerBuild();
   }
 
   public stop(): void {
-    if (this.fsWatcher) {
-      this.fsWatcher.dispose();
-      this.fsWatcher = null;
-    }
+    this.fsWatcher?.dispose();
+    this.fsWatcher = null;
+
+    this.gitIgnoreWatcher?.dispose();
+    this.gitIgnoreWatcher = null;
+
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
+
     this.activeProfile = null;
+    this.tokenCounter = null;
+    this.gitIgnoreParser = null;
+
     this.setState(WatcherState.Idle);
   }
 
@@ -115,18 +136,29 @@ export class Watcher implements vscode.Disposable {
       return;
     }
 
-    // If not already watching, we need to load the profile temporarily
-    if (!this.activeProfile || this.activeProfile.name !== targetProfileName) {
+    // Temporary load for single run if not watching
+    const wasIdle = this.state === WatcherState.Idle;
+
+    if (wasIdle || this.activeProfile?.name !== targetProfileName) {
+      // We need to setup a temporary environment for buildOnce
+      const config = await this.configManager.load();
       const profile = this.configManager.getProfile(targetProfileName);
       if (!profile) return;
+
       this.activeProfile = profile;
+      this.tokenCounter = new TokenCounter(config.globalSettings.tokenizerModel);
+      if (profile.options.useGitIgnore) {
+        await this.loadGitIgnore();
+      }
     }
 
     await this.triggerBuild();
 
-    // If we weren't watching, reset activeProfile
-    if (this.state === WatcherState.Idle) {
+    if (wasIdle) {
+      // Cleanup if we were idle
       this.activeProfile = null;
+      this.tokenCounter = null;
+      this.gitIgnoreParser = null;
     }
   }
 
@@ -143,16 +175,41 @@ export class Watcher implements vscode.Disposable {
     }
   }
 
+  private async loadGitIgnore(): Promise<void> {
+    const gitIgnorePath = path.join(this.workspaceRoot, '.gitignore');
+    try {
+      const content = await fs.readFile(gitIgnorePath, 'utf-8');
+      this.gitIgnoreParser = ignore().add(content);
+    } catch {
+      this.gitIgnoreParser = null;
+    }
+  }
+
+  private startGitIgnoreWatcher() {
+    const pattern = new vscode.RelativePattern(this.workspaceRoot, '.gitignore');
+    this.gitIgnoreWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+    const reload = async () => {
+      await this.loadGitIgnore();
+      this.handleFileEvent(vscode.Uri.file(path.join(this.workspaceRoot, '.gitignore'))); // Trigger rebuild
+    };
+
+    this.gitIgnoreWatcher.onDidChange(reload);
+    this.gitIgnoreWatcher.onDidCreate(reload);
+    this.gitIgnoreWatcher.onDidDelete(() => {
+      this.gitIgnoreParser = null;
+      this.handleFileEvent(vscode.Uri.file(path.join(this.workspaceRoot, '.gitignore')));
+    });
+  }
+
   private handleFileEvent(uri: vscode.Uri): void {
     if (!this.activeProfile) return;
 
-    // Safety: Prevent recursion by ignoring the output file
     const absoluteOutput = path.join(this.workspaceRoot, this.activeProfile.outputFile);
     if (uri.fsPath === absoluteOutput) {
       return;
     }
 
-    // Reset debounce timer
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
@@ -168,17 +225,25 @@ export class Watcher implements vscode.Disposable {
   }
 
   private async triggerBuild(): Promise<void> {
-    if (!this.activeProfile) return;
+    if (!this.activeProfile || !this.tokenCounter) return;
 
     this.setState(WatcherState.Building);
 
     try {
       const config = await this.configManager.load();
-      const resolver = new FileResolver(this.workspaceRoot, this.activeProfile, config.globalSettings);
+
+      // Inject cached gitIgnoreParser
+      const resolver = new FileResolver(
+        this.workspaceRoot,
+        this.activeProfile,
+        config.globalSettings,
+        this.gitIgnoreParser,
+      );
+
       const files = await resolver.resolve();
 
-      const tokenCounter = new TokenCounter(config.globalSettings.tokenizerModel);
-      const builder = new ContextBuilder(this.workspaceRoot, this.activeProfile, files, tokenCounter);
+      // Inject cached tokenCounter
+      const builder = new ContextBuilder(this.workspaceRoot, this.activeProfile, files, this.tokenCounter);
 
       const stats = await builder.build();
       this.lastStats = stats;
@@ -189,7 +254,6 @@ export class Watcher implements vscode.Disposable {
       vscode.window.showErrorMessage(`Context Build Failed: ${error instanceof Error ? error.message : String(error)}`);
       console.error(error);
     } finally {
-      // Return to Watching state if we are still initialized (not stopped during build)
       if (this.fsWatcher) {
         this.setState(WatcherState.Watching);
       } else {

@@ -1,8 +1,8 @@
-import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as fs from 'fs/promises';
 import fg from 'fast-glob';
 import * as mm from 'micromatch';
-import ignore from 'ignore';
+import { Ignore } from 'ignore';
 import { Profile, GlobalSettings } from '../types/config';
 import { HARDCODED_EXCLUDES } from '../utils/constants';
 
@@ -11,34 +11,35 @@ export class FileResolver {
     private readonly workspaceRoot: string,
     private readonly profile: Profile,
     private readonly globalSettings: GlobalSettings,
+    private readonly gitIgnoreParser: Ignore | null, // Injected dependency
   ) {}
 
   public async resolve(): Promise<string[]> {
-    // 1. Scan: Getting the initial list of files
+    // 1. Scan
     let files = await this.scanIncluded();
 
-    // 2. Filter (Explicit): Exclude files using exclude and hardcoded patterns
+    // 2. Filter (Explicit)
     files = this.applyExclude(files);
 
-    // 3. Filter (Git): Filter by .gitignore (if enabled)
-    if (this.profile.options.useGitIgnore) {
-      files = await this.applyGitIgnore(files);
+    // 3. Filter (Git) - Now synchronous and using cached parser
+    if (this.profile.options.useGitIgnore && this.gitIgnoreParser) {
+      files = this.gitIgnoreParser.filter(files);
     }
 
-    // 4. Merge (Force): Force adding files (bypasses filters above)
+    // 4. Merge (Force)
     files = await this.mergeForceInclude(files);
 
-    // 5. Safety: Excluding output file to prevent recursion (Absolute Path Check)
+    // 5. Safety: Output File
     files = this.excludeOutputFile(files, this.profile.outputFile);
 
-    // 6. Hard Limit Check: Check the total number of files before heavy operations
+    // 6. Hard Limit Check
     if (files.length > this.globalSettings.maxTotalFiles) {
       throw new Error(
         `Total files (${files.length}) exceeds limit (${this.globalSettings.maxTotalFiles}). Adjust your 'include'/'exclude' patterns.`,
       );
     }
 
-    // 7. Content Safety: Checking size and binarity (Parallel execution)
+    // 7. Content Safety
     files = await this.filterByContent(files);
 
     return files.sort();
@@ -60,19 +61,6 @@ export class FileResolver {
   private applyExclude(files: string[]): string[] {
     const allExcludes = [...this.profile.exclude, ...HARDCODED_EXCLUDES];
     return mm.not(files, allExcludes);
-  }
-
-  private async applyGitIgnore(files: string[]): Promise<string[]> {
-    const gitIgnorePath = path.join(this.workspaceRoot, '.gitignore');
-    try {
-      await fs.access(gitIgnorePath);
-    } catch {
-      return files;
-    }
-
-    const gitIgnoreContent = await fs.readFile(gitIgnorePath, 'utf-8');
-    const ig = ignore().add(gitIgnoreContent);
-    return ig.filter(files);
   }
 
   private async mergeForceInclude(files: string[]): Promise<string[]> {
@@ -97,7 +85,6 @@ export class FileResolver {
 
   private excludeOutputFile(files: string[], outputFile: string): string[] {
     const absoluteOutput = path.resolve(this.workspaceRoot, outputFile);
-
     return files.filter((f) => {
       const absoluteFile = path.resolve(this.workspaceRoot, f);
       return absoluteFile !== absoluteOutput;
@@ -116,7 +103,7 @@ export class FileResolver {
           if (await this.isBinary(absPath)) return null;
           return file;
         } catch {
-          return null; // Skip deleted/inaccessible files
+          return null;
         }
       }),
     );

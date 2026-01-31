@@ -1,4 +1,3 @@
-import * as fs from 'fs/promises';
 import { getEncoding, encodingForModel, Tiktoken, TiktokenModel } from 'js-tiktoken';
 
 export class TokenCounter {
@@ -21,7 +20,6 @@ export class TokenCounter {
         // Fallback checks standard encodings if model name fails
         const fallback = getEncoding('cl100k_base');
         this.encoder = fallback;
-        // Do not cache generic fallback under the specific model name to allow retry
       } catch (e) {
         console.warn('TokenCounter: Failed to initialize tokenizer. Using heuristic fallback.', e);
         this.encoder = null;
@@ -41,18 +39,6 @@ export class TokenCounter {
     } catch (e) {
       console.warn('TokenCounter: Error encoding text, using fallback.', e);
       return Math.ceil(text.length / 4);
-    }
-  }
-
-  /**
-   * Reads a file and counts tokens.
-   */
-  public async countFile(filePath: string): Promise<number> {
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      return this.count(content);
-    } catch {
-      return 0;
     }
   }
 }
