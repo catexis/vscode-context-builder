@@ -1,0 +1,44 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  GIT_SHA:
+    sh: git rev-parse --short=8 HEAD
+  CURRENT_DATETIME:
+    sh: date +"%Y-%m-%d_%H-%M-%S"
+
+dotenv: [.env]
+
+tasks:
+  default:
+    cmds:
+      - task --list-all
+    silent: true
+
+  tree:
+    desc: 'Generate files tree in JSON format'
+    cmds:
+      - tree -n -J -L 6 --dirsfirst -I 'node_modules|var' > ./var/files_tree.json
+
+  fmt:
+    desc: 'Format code with Prettier'
+    cmds:
+      - npm run format
+
+  checks:types:
+    desc: 'Run TypeScript type checks'
+    cmds:
+      - npm run check-types
+
+  checks:lint:
+    desc: 'Run ESLint linter'
+    cmds:
+      - npm run lint
+
+  codequality:
+    desc: 'Run all code quality checks'
+    deps:
+      - task: fmt
+      - task: checks:types
+      - task: checks:lint
