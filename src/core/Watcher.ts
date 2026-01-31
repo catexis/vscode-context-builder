@@ -19,6 +19,10 @@ export class Watcher implements vscode.Disposable {
   private debounceTimer: NodeJS.Timeout | null = null;
   private lastStats: BuildStats | null = null;
 
+  // Concurrency control
+  private isBuilding = false;
+  private buildPending = false;
+
   // Long-lived instances for the active session
   private tokenCounter: TokenCounter | null = null;
   private gitIgnoreParser: Ignore | null = null;
@@ -91,8 +95,6 @@ export class Watcher implements vscode.Disposable {
     this.setState(WatcherState.Watching);
 
     // 3. Setup File Watcher
-    // Temporarily instantiate FileResolver just to get patterns.
-    // We pass existing gitIgnoreParser to avoid re-reading disk even here.
     const resolver = new FileResolver(this.workspaceRoot, profile, config.globalSettings, this.gitIgnoreParser);
     const patterns = resolver.getWatchPatterns();
 
@@ -125,6 +127,10 @@ export class Watcher implements vscode.Disposable {
     this.activeProfile = null;
     this.tokenCounter = null;
     this.gitIgnoreParser = null;
+
+    // Reset flags
+    this.isBuilding = false;
+    this.buildPending = false;
 
     this.setState(WatcherState.Idle);
   }
@@ -225,8 +231,15 @@ export class Watcher implements vscode.Disposable {
   }
 
   private async triggerBuild(): Promise<void> {
+    // 1. Concurrency Check
+    if (this.isBuilding) {
+      this.buildPending = true;
+      return;
+    }
+
     if (!this.activeProfile || !this.tokenCounter) return;
 
+    this.isBuilding = true;
     this.setState(WatcherState.Building);
 
     try {
@@ -254,10 +267,20 @@ export class Watcher implements vscode.Disposable {
       vscode.window.showErrorMessage(`Context Build Failed: ${error instanceof Error ? error.message : String(error)}`);
       console.error(error);
     } finally {
-      if (this.fsWatcher) {
-        this.setState(WatcherState.Watching);
+      this.isBuilding = false;
+
+      // 2. Check for pending builds during execution
+      if (this.buildPending) {
+        this.buildPending = false;
+        // Small delay to let event loop breathe, then retry
+        setTimeout(() => this.triggerBuild(), 100);
       } else {
-        this.setState(WatcherState.Idle);
+        // Return to normal state
+        if (this.fsWatcher) {
+          this.setState(WatcherState.Watching);
+        } else {
+          this.setState(WatcherState.Idle);
+        }
       }
     }
   }

@@ -5,7 +5,7 @@ import { StatusBar } from './ui/StatusBar';
 import { registerCommands } from './ui/Commands';
 import { WatcherState } from './types/state';
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) {
     return; // Context Builder works only in workspace/folder mode
@@ -24,6 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
   registerCommands(context, watcher, configManager, workspaceRoot);
 
   // Auto-start watching for config changes
+  // This usually triggers an initial load event via reload()
   configManager.startWatching();
 
   // Add disposables to context
@@ -37,12 +38,27 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   watcher.onBuildFinished((stats) => {
-    // Update status bar with new stats if we are back in Watching state
     if (watcher.state === WatcherState.Watching) {
       const profileName = watcher.currentProfile?.name;
       statusBar.update(WatcherState.Watching, profileName, stats.fileCount);
     }
   });
+
+  // Explicit Initialization (Review Fix)
+  // We explicitly check for config existence to ensure the watcher starts
+  // even if the file watcher event is delayed or missed during startup.
+  if (await configManager.exists()) {
+    try {
+      const config = await configManager.load();
+      // Only start if not already started by the event listener (race condition protection)
+      if (watcher.state === WatcherState.Idle && config.activeProfile) {
+        console.log('Context Builder: Explicit start triggered');
+        await watcher.start(config.activeProfile);
+      }
+    } catch (error) {
+      console.error('Context Builder: Initial config load failed', error);
+    }
+  }
 }
 
 export function deactivate() {}
