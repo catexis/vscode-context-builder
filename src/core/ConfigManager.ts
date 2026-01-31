@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ContextConfig, Profile } from '../types/config';
+import { ContextConfig, Profile, ProfileOptions } from '../types/config';
 import {
   CONFIG_PATH,
   DEFAULT_DEBOUNCE_MS,
@@ -107,14 +107,8 @@ export class ConfigManager implements vscode.Disposable {
         this._onConfigChanged.fire(config);
       } catch (error) {
         this._onConfigChanged.fire(null);
-        const action = await vscode.window.showErrorMessage(
-          `Context Builder Config Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          'Open Config',
-        );
-        if (action === 'Open Config') {
-          const doc = await vscode.workspace.openTextDocument(this.getConfigPath());
-          await vscode.window.showTextDocument(doc);
-        }
+        // We don't show the UI error on every key press, we log it to the console or output channel
+        console.error(`Context Builder Config Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     };
 
@@ -162,12 +156,23 @@ export class ConfigManager implements vscode.Disposable {
         !Array.isArray(profile.include) ||
         !Array.isArray(profile.exclude) ||
         !Array.isArray(profile.forceInclude) ||
-        typeof profile.options !== 'object'
+        typeof profile.options !== 'object' ||
+        !this.validateProfileOptions(profile.options) // Deep check
       ) {
         return false;
       }
     }
 
     return true;
+  }
+
+  private validateProfileOptions(options: any): options is ProfileOptions {
+    return (
+      typeof options.useGitIgnore === 'boolean' &&
+      typeof options.removeComments === 'boolean' &&
+      typeof options.showTokenCount === 'boolean' &&
+      typeof options.showFileTree === 'boolean' &&
+      typeof options.preamble === 'string'
+    );
   }
 }

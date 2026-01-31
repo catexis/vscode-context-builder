@@ -2,16 +2,26 @@ import * as fs from 'fs/promises';
 import { getEncoding, encodingForModel, Tiktoken, TiktokenModel } from 'js-tiktoken';
 
 export class TokenCounter {
+  // Static cache to avoid re-parsing BPE ranks on every instantiation
+  private static encoderCache = new Map<string, Tiktoken>();
+
   private encoder: Tiktoken | null = null;
 
   constructor(modelName: string) {
+    if (TokenCounter.encoderCache.has(modelName)) {
+      this.encoder = TokenCounter.encoderCache.get(modelName)!;
+      return;
+    }
+
     try {
-      // Attempt to load the encoding for a specific model (e.g. gpt-4o uses o200k_base)
       this.encoder = encodingForModel(modelName as TiktokenModel);
+      TokenCounter.encoderCache.set(modelName, this.encoder);
     } catch {
       try {
-        // Fallback to standard encoding for GPT-3.5/4
-        this.encoder = getEncoding('cl100k_base');
+        // Fallback checks standard encodings if model name fails
+        const fallback = getEncoding('cl100k_base');
+        this.encoder = fallback;
+        // Do not cache generic fallback under the specific model name to allow retry
       } catch (e) {
         console.warn('TokenCounter: Failed to initialize tokenizer. Using heuristic fallback.', e);
         this.encoder = null;
@@ -21,7 +31,6 @@ export class TokenCounter {
 
   /**
    * Counts tokens in a string.
-   * If the encoder is not initialized, uses a rough estimate (1 token ~= 4 characters).
    */
   public count(text: string): number {
     if (!this.encoder) {
@@ -37,7 +46,6 @@ export class TokenCounter {
 
   /**
    * Reads a file and counts tokens.
-   * Read errors (e.g., deleted file) return 0.
    */
   public async countFile(filePath: string): Promise<number> {
     try {

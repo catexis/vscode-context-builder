@@ -28,7 +28,7 @@ export class FileResolver {
     // 4. Merge (Force): Force adding files (bypasses filters above)
     files = await this.mergeForceInclude(files);
 
-    // 5. Safety: Excluding output file to prevent recursion
+    // 5. Safety: Excluding output file to prevent recursion (Absolute Path Check)
     files = this.excludeOutputFile(files, this.profile.outputFile);
 
     // 6. Hard Limit Check: Check the total number of files before heavy operations
@@ -38,7 +38,7 @@ export class FileResolver {
       );
     }
 
-    // 7. Content Safety: Checking size and binarity
+    // 7. Content Safety: Checking size and binarity (Parallel execution)
     files = await this.filterByContent(files);
 
     return files.sort();
@@ -53,7 +53,7 @@ export class FileResolver {
       cwd: this.workspaceRoot,
       dot: true,
       onlyFiles: true,
-      absolute: false, // Working with relative paths for clarity
+      absolute: false,
     });
   }
 
@@ -67,7 +67,7 @@ export class FileResolver {
     try {
       await fs.access(gitIgnorePath);
     } catch {
-      return files; // If there is no .gitignore, return as is
+      return files;
     }
 
     const gitIgnoreContent = await fs.readFile(gitIgnorePath, 'utf-8');
@@ -81,8 +81,6 @@ export class FileResolver {
     }
 
     const fileSet = new Set(files);
-
-    // forceInclude can also contain glob patterns
     const forceFiles = await fg(this.profile.forceInclude, {
       cwd: this.workspaceRoot,
       dot: true,
@@ -98,55 +96,47 @@ export class FileResolver {
   }
 
   private excludeOutputFile(files: string[], outputFile: string): string[] {
-    // Normalize paths for cross-platform comparison
-    const normalizedOutput = outputFile.replace(/\\/g, '/');
-    return files.filter((f) => f !== normalizedOutput);
+    const absoluteOutput = path.resolve(this.workspaceRoot, outputFile);
+
+    return files.filter((f) => {
+      const absoluteFile = path.resolve(this.workspaceRoot, f);
+      return absoluteFile !== absoluteOutput;
+    });
   }
 
   private async filterByContent(files: string[]): Promise<string[]> {
-    const validFiles: string[] = [];
     const maxBytes = this.globalSettings.maxFileSizeKB * 1024;
 
-    for (const file of files) {
-      const absPath = path.join(this.workspaceRoot, file);
-      try {
-        const stats = await fs.stat(absPath);
-
-        // Exclude overly large files
-        if (stats.size > maxBytes) {
-          continue;
+    const checks = await Promise.all(
+      files.map(async (file) => {
+        const absPath = path.join(this.workspaceRoot, file);
+        try {
+          const stats = await fs.stat(absPath);
+          if (stats.size > maxBytes) return null;
+          if (await this.isBinary(absPath)) return null;
+          return file;
+        } catch {
+          return null; // Skip deleted/inaccessible files
         }
+      }),
+    );
 
-        // Excluding binary files
-        if (await this.isBinary(absPath)) {
-          continue;
-        }
-
-        validFiles.push(file);
-      } catch (e) {
-        // The file could have been deleted during scanning, skipping
-        continue;
-      }
-    }
-    return validFiles;
+    return checks.filter((f): f is string => f !== null);
   }
 
   private async isBinary(filePath: string): Promise<boolean> {
     let handle: fs.FileHandle | undefined;
     try {
       handle = await fs.open(filePath, 'r');
-      const buffer = Buffer.alloc(8192); // Read the first 8KB
+      const buffer = Buffer.alloc(8192);
       const { bytesRead } = await handle.read(buffer, 0, 8192, 0);
 
       for (let i = 0; i < bytesRead; i++) {
-        if (buffer[i] === 0) {
-          // Null byte detection
-          return true;
-        }
+        if (buffer[i] === 0) return true;
       }
       return false;
     } catch {
-      return true; // If there is a reading error, we consider it binary to be on the safe side.
+      return true;
     } finally {
       await handle?.close();
     }
