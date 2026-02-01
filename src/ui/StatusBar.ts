@@ -6,7 +6,7 @@ export class StatusBar implements vscode.Disposable {
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.statusBarItem.command = 'context-builder.showMenu'; // Команда будет зарегистрирована в следующей фазе
+    this.statusBarItem.command = 'context-builder.showMenu';
     this.update(WatcherState.Idle);
     this.statusBarItem.show();
   }
