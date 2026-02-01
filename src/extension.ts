@@ -80,7 +80,7 @@ export async function activate(context: vscode.ExtensionContext) {
         await watcher.start(config.activeProfile);
       }
     } catch (error) {
-      Logger.error('Initial config load failed', error);
+      Logger.error('Initial config load failed', error, true);
       // Optional: Show output channel on critical init failure
       // Logger.show();
     }

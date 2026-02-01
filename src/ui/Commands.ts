@@ -92,7 +92,7 @@ export function registerCommands(
         vscode.window.showInformationMessage('Context Builder: Build complete.');
       } catch (e) {
         vscode.window.showErrorMessage('Build failed. Check config.');
-        Logger.error('Command buildOnce failed', e);
+        Logger.error('Command buildOnce failed', e, true);
       }
     }),
   );

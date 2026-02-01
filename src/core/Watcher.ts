@@ -270,7 +270,7 @@ export class Watcher implements vscode.Disposable {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       vscode.window.showErrorMessage(`Context Build Failed: ${msg}`);
-      Logger.error('Build process failed', error);
+      Logger.error('Build process failed', error, true);
     } finally {
       this.isBuilding = false;
 

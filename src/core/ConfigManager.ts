@@ -112,7 +112,7 @@ export class ConfigManager implements vscode.Disposable {
         Logger.info(`Config loaded. Active profile: ${config.activeProfile}`);
       } catch (error) {
         this._onConfigChanged.fire(null);
-        Logger.error('Config reload failed', error);
+        Logger.error('Config reload failed', error, true);
       }
     };
 

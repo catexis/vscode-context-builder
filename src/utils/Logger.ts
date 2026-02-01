@@ -16,7 +16,8 @@ export class Logger {
     this.log('WARN', message);
   }
 
-  public static error(message: string, error?: unknown): void {
+  // Added 'focus' parameter
+  public static error(message: string, error?: unknown, focus: boolean = false): void {
     this.log('ERROR', message);
     if (error) {
       if (error instanceof Error) {
@@ -24,6 +25,10 @@ export class Logger {
       } else {
         this.outputChannel.appendLine(`      Detail: ${String(error)}`);
       }
+    }
+
+    if (focus) {
+      this.show();
     }
   }
 
