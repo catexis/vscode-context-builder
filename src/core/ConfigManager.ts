@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_TOTAL_FILES,
 } from '../utils/constants';
+import { Logger } from '../utils/Logger';
 
 export class ConfigManager implements vscode.Disposable {
   private configWatcher: vscode.FileSystemWatcher | null = null;
@@ -98,16 +99,20 @@ export class ConfigManager implements vscode.Disposable {
       return;
     }
 
+    Logger.info('Starting config watcher...');
+
     const pattern = new vscode.RelativePattern(this.workspaceRoot, CONFIG_PATH);
     this.configWatcher = vscode.workspace.createFileSystemWatcher(pattern);
 
     const reload = async () => {
       try {
+        Logger.info('Config file changed/created. Reloading...');
         const config = await this.load();
         this._onConfigChanged.fire(config);
+        Logger.info(`Config loaded. Active profile: ${config.activeProfile}`);
       } catch (error) {
         this._onConfigChanged.fire(null);
-        console.error(`Context Builder Config Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        Logger.error('Config reload failed', error);
       }
     };
 

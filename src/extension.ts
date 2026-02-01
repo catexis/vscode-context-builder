@@ -4,14 +4,21 @@ import { Watcher } from './core/Watcher';
 import { StatusBar } from './ui/StatusBar';
 import { registerCommands } from './ui/Commands';
 import { WatcherState } from './types/state';
+import { Logger } from './utils/Logger'; // Import
 
 export async function activate(context: vscode.ExtensionContext) {
+  // 1. Init Logger FIRST
+  Logger.activate(context);
+  Logger.info('Extension "Context Builder" is activating...');
+
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) {
-    return; // Context Builder works only in workspace/folder mode
+    Logger.warn('No workspace folder found. Extension disabled.');
+    return;
   }
 
   const workspaceRoot = workspaceFolders[0].uri.fsPath;
+  Logger.info(`Workspace root: ${workspaceRoot}`);
 
   // Initialize Core Components
   const configManager = new ConfigManager(workspaceRoot);
@@ -24,7 +31,6 @@ export async function activate(context: vscode.ExtensionContext) {
   registerCommands(context, watcher, configManager, workspaceRoot);
 
   // Auto-start watching for config changes
-  // This usually triggers an initial load event via reload()
   configManager.startWatching();
 
   // Add disposables to context
@@ -35,30 +41,31 @@ export async function activate(context: vscode.ExtensionContext) {
     const profileName = watcher.currentProfile?.name;
     const stats = watcher.currentStats;
     statusBar.update(state, profileName, stats?.fileCount);
+    Logger.info(`State changed: ${state}`);
   });
 
   watcher.onBuildFinished((stats) => {
+    Logger.info(`Build finished: ${stats.fileCount} files, ${stats.tokenCount} tokens`);
     if (watcher.state === WatcherState.Watching) {
       const profileName = watcher.currentProfile?.name;
       statusBar.update(WatcherState.Watching, profileName, stats.fileCount);
     }
   });
 
-  // Explicit Initialization (Review Fix)
-  // We explicitly check for config existence to ensure the watcher starts
-  // even if the file watcher event is delayed or missed during startup.
+  // Explicit Initialization
   if (await configManager.exists()) {
     try {
       const config = await configManager.load();
-      // Only start if not already started by the event listener (race condition protection)
       if (watcher.state === WatcherState.Idle && config.activeProfile) {
-        console.log('Context Builder: Explicit start triggered');
+        Logger.info('Triggering explicit start from existing config');
         await watcher.start(config.activeProfile);
       }
     } catch (error) {
-      console.error('Context Builder: Initial config load failed', error);
+      Logger.error('Initial config load failed', error);
     }
   }
 }
 
-export function deactivate() {}
+export function deactivate() {
+  Logger.info('Extension deactivated.');
+}

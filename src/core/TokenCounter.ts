@@ -1,4 +1,5 @@
 import { getEncoding, encodingForModel, Tiktoken, TiktokenModel } from 'js-tiktoken';
+import { Logger } from '../utils/Logger';
 
 export class TokenCounter {
   // Static cache to avoid re-parsing BPE ranks on every instantiation
@@ -21,7 +22,7 @@ export class TokenCounter {
         const fallback = getEncoding('cl100k_base');
         this.encoder = fallback;
       } catch (e) {
-        console.warn('TokenCounter: Failed to initialize tokenizer. Using heuristic fallback.', e);
+        Logger.warn('Failed to initialize tokenizer. Using heuristic fallback.');
         this.encoder = null;
       }
     }
@@ -37,7 +38,7 @@ export class TokenCounter {
     try {
       return this.encoder.encode(text).length;
     } catch (e) {
-      console.warn('TokenCounter: Error encoding text, using fallback.', e);
+      Logger.warn('Error encoding text, using fallback.');
       return Math.ceil(text.length / 4);
     }
   }

@@ -4,6 +4,7 @@ import { Profile } from '../types/config';
 import { BuildStats } from '../types/state';
 import { TokenCounter } from './TokenCounter';
 import { LANGUAGE_MAP } from '../utils/languageMap';
+import { Logger } from '../utils/Logger';
 
 type TreeNode = { [key: string]: TreeNode };
 
@@ -170,7 +171,7 @@ export class ContextBuilder {
       content = await fs.readFile(absPath, 'utf-8');
     } catch (error) {
       // 10.1: Log error and skip file
-      console.error(`Context Builder: Failed to read file ${filePath}`, error);
+      Logger.error(`Failed to read file: ${filePath}`, error);
       return null;
     }
 

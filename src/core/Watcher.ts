@@ -8,6 +8,7 @@ import { ContextBuilder } from './ContextBuilder';
 import { TokenCounter } from './TokenCounter';
 import { WatcherState, BuildStats } from '../types/state';
 import { Profile } from '../types/config';
+import { Logger } from '../utils/Logger';
 
 export class Watcher implements vscode.Disposable {
   private _state: WatcherState = WatcherState.Idle;
@@ -71,6 +72,7 @@ export class Watcher implements vscode.Disposable {
   }
 
   public async start(profileName: string): Promise<void> {
+    Logger.info(`Starting watcher for profile: "${profileName}"`);
     const config = await this.configManager.load();
     const profile = this.configManager.getProfile(profileName);
 
@@ -113,6 +115,9 @@ export class Watcher implements vscode.Disposable {
   }
 
   public stop(): void {
+    if (this.state !== WatcherState.Idle) {
+      Logger.info('Stopping watcher...');
+    }
     this.fsWatcher?.dispose();
     this.fsWatcher = null;
 
@@ -254,6 +259,7 @@ export class Watcher implements vscode.Disposable {
       );
 
       const files = await resolver.resolve();
+      Logger.info(`Resolved ${files.length} files. Starting assembly...`);
 
       // Inject cached tokenCounter
       const builder = new ContextBuilder(this.workspaceRoot, this.activeProfile, files, this.tokenCounter);
@@ -261,11 +267,10 @@ export class Watcher implements vscode.Disposable {
       const stats = await builder.build();
       this.lastStats = stats;
       this._onBuildFinished.fire(stats);
-
-      console.log(`[Context Builder] Build complete: ${stats.fileCount} files, ${stats.tokenCount} tokens`);
     } catch (error) {
-      vscode.window.showErrorMessage(`Context Build Failed: ${error instanceof Error ? error.message : String(error)}`);
-      console.error(error);
+      const msg = error instanceof Error ? error.message : String(error);
+      vscode.window.showErrorMessage(`Context Build Failed: ${msg}`);
+      Logger.error('Build process failed', error);
     } finally {
       this.isBuilding = false;
 

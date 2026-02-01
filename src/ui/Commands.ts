@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Watcher } from '../core/Watcher';
 import { ConfigManager } from '../core/ConfigManager';
 import { WatcherState } from '../types/state';
+import { Logger } from '../utils/Logger';
 
 export function registerCommands(
   context: vscode.ExtensionContext,
@@ -91,7 +92,7 @@ export function registerCommands(
         vscode.window.showInformationMessage('Context Builder: Build complete.');
       } catch (e) {
         vscode.window.showErrorMessage('Build failed. Check config.');
-        console.error(e);
+        Logger.error('Command buildOnce failed', e);
       }
     }),
   );
