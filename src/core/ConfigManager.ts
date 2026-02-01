@@ -112,7 +112,20 @@ export class ConfigManager implements vscode.Disposable {
         Logger.info(`Config loaded. Active profile: ${config.activeProfile}`);
       } catch (error) {
         this._onConfigChanged.fire(null);
-        Logger.error('Config reload failed', error, true);
+        // Log error but do not steal focus, relying on UI notification instead
+        Logger.error('Config reload failed', error);
+
+        const message = error instanceof Error ? error.message : String(error);
+        const action = await vscode.window.showErrorMessage('Invalid config: ' + message, { title: 'Open Config' });
+
+        if (action?.title === 'Open Config') {
+          try {
+            const doc = await vscode.workspace.openTextDocument(this.getConfigPath());
+            await vscode.window.showTextDocument(doc);
+          } catch (e) {
+            Logger.error('Failed to open config file', e);
+          }
+        }
       }
     };
 

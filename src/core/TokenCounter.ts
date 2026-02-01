@@ -1,3 +1,4 @@
+import * as fs from 'fs/promises';
 import { getEncoding, encodingForModel, Tiktoken, TiktokenModel } from 'js-tiktoken';
 import { Logger } from '../utils/Logger';
 
@@ -28,9 +29,7 @@ export class TokenCounter {
     }
   }
 
-  /**
-   * Counts tokens in a string.
-   */
+  // Counts tokens in a string
   public count(text: string): number {
     if (!this.encoder) {
       return Math.ceil(text.length / 4);
@@ -40,6 +39,17 @@ export class TokenCounter {
     } catch (e) {
       Logger.warn('Error encoding text, using fallback.');
       return Math.ceil(text.length / 4);
+    }
+  }
+
+  // Counts tokens in a file.
+  public async countFile(filePath: string): Promise<number> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return this.count(content);
+    } catch (error) {
+      Logger.warn(`Failed to count tokens for file: ${filePath}`);
+      return 0;
     }
   }
 }
