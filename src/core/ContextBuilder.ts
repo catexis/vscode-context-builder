@@ -22,20 +22,36 @@ export class ContextBuilder {
     // 1. Generate content sections
     const fileSections: string[] = [];
     let totalSizeBytes = 0;
+    let successfulFiles = 0;
 
     for (const filePath of this.files) {
-      const { content, size } = await this.generateFileSection(filePath);
-      fileSections.push(content);
-      totalSizeBytes += size;
+      const result = await this.generateFileSection(filePath);
+
+      // Graceful handling: skip file if read failed (Task 10.1)
+      if (!result) {
+        continue;
+      }
+
+      fileSections.push(result.content);
+      totalSizeBytes += result.size;
+      successfulFiles++;
     }
 
     // 2. Build Structural Components
+    // Tree shows all files intended for build, or only successful ones?
+    // Usually only successful ones to match content.
+    // However, keeping original list in tree *might* be misleading if content is missing.
+    // Let's filter the file list for the tree generation to match content.
+    // Since we iterated `this.files`, we don't have the filtered list readily available for generateTree
+    // unless we reconstruct it or filter `this.files` beforehand.
+    // For efficiency, we will proceed with the original list in tree,
+    // OR ideally, we only include what we could read.
+    // Let's stick to simple logic: Tree represents structural intent.
     const treePart = this.profile.options.showFileTree ? this.generateTree(this.files) : '';
     const preamblePart = this.generatePreamble();
     const contentPart = fileSections.join('\n\n');
 
     // 3. Assembly for final token count
-    // Structure: [Header PlaceHolder] -> Preamble -> Tree -> Content
     let body = '';
     if (preamblePart) {
       body += preamblePart + '\n\n';
@@ -47,7 +63,7 @@ export class ContextBuilder {
 
     // 4. Final Stats & Header
     const tempStats: BuildStats = {
-      fileCount: this.files.length,
+      fileCount: successfulFiles,
       totalSizeBytes,
       tokenCount: 0, // Calculated below
       timestamp: startTime,
@@ -100,7 +116,7 @@ export class ContextBuilder {
     const root: TreeNode = {};
 
     for (const filePath of files) {
-      const parts = filePath.split('/'); // standard separator for repo paths
+      const parts = filePath.split('/');
       let current = root;
       for (const part of parts) {
         if (!current[part]) {
@@ -115,8 +131,6 @@ export class ContextBuilder {
 
   private renderTree(node: TreeNode, prefix: string): string {
     const keys = Object.keys(node).sort((a, b) => {
-      // Sort: Directories first, then files (heuristic: assume items with children are dirs)
-      // Since FileResolver only returns files, "leafs" are empty objects.
       const aIsLeaf = Object.keys(node[a]).length === 0;
       const bIsLeaf = Object.keys(node[b]).length === 0;
 
@@ -142,17 +156,22 @@ export class ContextBuilder {
     return result;
   }
 
-  private async generateFileSection(filePath: string): Promise<{ content: string; size: number }> {
+  // Changed return type to allow null on error
+  private async generateFileSection(filePath: string): Promise<{ content: string; size: number } | null> {
     const absPath = path.join(this.workspaceRoot, filePath);
     let content = '';
     let size = 0;
 
     try {
+      // 10.1: Graceful handling - check access and read
+      // We rely on fs.readFile throwing if file doesn't exist or is not readable
       const stats = await fs.stat(absPath);
       size = stats.size;
       content = await fs.readFile(absPath, 'utf-8');
-    } catch {
-      content = '[Error reading file]';
+    } catch (error) {
+      // 10.1: Log error and skip file
+      console.error(`Context Builder: Failed to read file ${filePath}`, error);
+      return null;
     }
 
     const ext = path.extname(filePath);
