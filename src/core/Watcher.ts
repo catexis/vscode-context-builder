@@ -56,6 +56,13 @@ export class Watcher implements vscode.Disposable {
           );
         }
       }
+
+      if (this.state === WatcherState.Idle && config.activeProfile) {
+        const profile = config.profiles.find((p) => p.name === config.activeProfile);
+        if (profile) {
+          this.start(config.activeProfile);
+        }
+      }
     });
   }
 
