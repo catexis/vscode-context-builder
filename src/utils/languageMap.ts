@@ -352,7 +352,7 @@ export const LANGUAGE_MAP: Record<string, string> = {
   '.gd': 'gap',
   '.gi': 'gap',
   '.tst': 'gap',
-  '.md': 'lisp',
+  '.md': 'markdown',
   '.gdb': 'gdb',
   '.gdbinit': 'gdb',
   '.gdshader': 'glsl',
