@@ -7,7 +7,7 @@ import { WatcherState } from './types/state';
 import { Logger } from './utils/Logger';
 
 export async function activate(context: vscode.ExtensionContext) {
-  // 1. Init Logger FIRST
+  // Init Logger FIRST
   Logger.activate(context);
   Logger.info('Extension "Context Builder" is activating...');
 
@@ -38,6 +38,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Initialize Core Components
   const configManager = new ConfigManager(workspaceRoot);
+  // Watcher subscribes to configManager.onDidChangeConfig in its constructor
   const watcher = new Watcher(workspaceRoot, configManager);
 
   // Initialize UI
@@ -45,9 +46,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Initialize Commands
   registerCommands(context, watcher, configManager, workspaceRoot);
-
-  // Auto-start watching for config changes
-  configManager.startWatching();
 
   // Add disposables to context
   context.subscriptions.push(configManager, watcher, statusBar);
@@ -68,23 +66,10 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  // Explicit Initialization
-  // We explicitly check for config existence to ensure the watcher starts
-  // even if the file watcher event is delayed or missed during startup.
-  if (await configManager.exists()) {
-    try {
-      const config = await configManager.load();
-      // Only start if not already started by the event listener (race condition protection)
-      if (watcher.state === WatcherState.Idle && config.activeProfile) {
-        Logger.info('Triggering explicit start from existing config');
-        await watcher.start(config.activeProfile);
-      }
-    } catch (error) {
-      Logger.error('Initial config load failed', error, true);
-      // Optional: Show output channel on critical init failure
-      // Logger.show();
-    }
-  }
+  // Start watching for config changes.
+  // This internally triggers an initial reload(), which fires the onDidChangeConfig event.
+  // The Watcher catches this event and starts automatically if a valid profile exists.
+  configManager.startWatching();
 }
 
 export function deactivate() {

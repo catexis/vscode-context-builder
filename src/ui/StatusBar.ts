@@ -20,12 +20,12 @@ export class StatusBar implements vscode.Disposable {
 
       case WatcherState.Watching:
         const countStr = fileCount !== undefined ? `${fileCount} files` : 'Ready';
-        this.statusBarItem.text = `$(circle-filled) ${profileName} (${countStr})`;
+        this.statusBarItem.text = `🟢 ${profileName} (${countStr})`;
         this.statusBarItem.tooltip = `Watching profile: ${profileName}. Click for options.`;
         break;
 
       case WatcherState.Debouncing:
-        this.statusBarItem.text = `$(sync~spin) ${profileName} (Waiting...)`;
+        this.statusBarItem.text = `🟡 ${profileName} (Waiting...)`;
         this.statusBarItem.tooltip = 'Waiting for file changes to settle...';
         break;
 

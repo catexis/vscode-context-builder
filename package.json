@@ -10,6 +10,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onCommand:context-builder.initConfig",
     "workspaceContains:.vscode/context-config.json"
   ],
   "main": "./dist/extension.js",
@@ -43,6 +44,11 @@
       {
         "command": "context-builder.copyOutputPath",
         "title": "Copy Output Path",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.showMenu",
+        "title": "Show Menu",
         "category": "Context Builder"
       }
     ]
