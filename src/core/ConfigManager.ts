@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { modify, applyEdits } from 'jsonc-parser';
 import { ContextConfig, Profile, ProfileOptions } from '../types/config';
 import {
   CONFIG_PATH,
@@ -152,27 +153,26 @@ export class ConfigManager implements vscode.Disposable {
   public async updateActiveProfile(profileName: string): Promise<void> {
     if (!this.currentConfig) return;
 
-    // Don't overwrite if the profile is the same (save I/O and watcher events)
     if (this.currentConfig.activeProfile === profileName) return;
+
+    this.currentConfig.activeProfile = profileName;
 
     const configPath = this.getConfigPath();
 
     try {
-      // Read the raw file to preserve formatting (as much as possible) or structure,
-      // if the object in memory differs from the one on disk (even though we just loaded it).
-      // It's safer to read, parse, modify, and write.
       const content = await fs.readFile(configPath, 'utf-8');
-      const configJson = JSON.parse(content);
 
-      configJson.activeProfile = profileName;
+      const edits = modify(content, ['activeProfile'], profileName, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      });
 
-      // Update the in-memory cache to avoid a race before the watcher fires
-      if (this.currentConfig) {
-        this.currentConfig.activeProfile = profileName;
-      }
+      const newContent = applyEdits(content, edits);
 
-      await fs.writeFile(configPath, JSON.stringify(configJson, null, 2), 'utf-8');
-      Logger.info(`Updated activeProfile to "${profileName}" in config file.`);
+      await fs.writeFile(configPath, newContent, 'utf-8');
+      Logger.info(`Updated activeProfile to "${profileName}" in config file using jsonc-parser.`);
     } catch (error) {
       Logger.error('Failed to update active profile in config', error);
       vscode.window.showErrorMessage('Failed to save profile selection to config file.');
