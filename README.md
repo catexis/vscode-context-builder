@@ -1,71 +1,95 @@
-# context-builder README
+# Context Builder
 
-This is the README for your extension "context-builder". After writing up a brief description, we recommend including the following sections.
+Context Builder is a VS Code extension that automates the creation of a project context file. It aggregates source code files into a single Markdown document, making it easier to provide context to Large Language Models (LLMs).
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **File Aggregation**: Combines multiple source files into one structured Markdown file.
+- **Watch Mode**: Monitors file changes in real-time and automatically rebuilds the context file.
+- **Profiles**: Supports multiple configurations (e.g., backend, frontend) via a JSON config file.
+- **Smart Filtering**: Respects `.gitignore` rules, excludes binary files, and filters by file size.
+- **Token Counting**: Calculates estimated token count (using `cl100k_base` encoding) for the generated context.
+- **Structure Visualization**: Generates a text-based file tree of the included files.
 
-For example if there is an image subfolder under your extension project workspace:
+## Usage
 
-\!\[feature X\]\(images/feature-x.png\)
+1.  Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`).
+2.  Run **Context Builder: Init Configuration**. This creates a `.vscode/context-config.json` file.
+3.  Edit the configuration file to define your profiles and file patterns.
+4.  Run **Context Builder: Start Watching** or click the status bar item to begin monitoring.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+The extension will generate the output file (e.g., `.context/context.md`) whenever a relevant file changes.
 
-## Requirements
+## Configuration
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+The extension is configured via `.vscode/context-config.json`.
 
-## Extension Settings
+### Global Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+- `debounceMs`: Time in milliseconds to wait after a file change before rebuilding (default: 3000).
+- `maxFileSizeKB`: Maximum size of a single file to include (default: 1024).
+- `maxTotalFiles`: Maximum number of files allowed in a build (default: 500).
+- `tokenizerModel`: Model used for token counting (default: "gpt-4o").
 
-For example:
+### Profiles
 
-This extension contributes the following settings:
+Define sets of rules for different contexts.
 
-- `myExtension.enable`: Enable/disable this extension.
-- `myExtension.thing`: Set to `blah` to do something.
+- `name`: Unique identifier for the profile.
+- `outputFile`: Path to the generated Markdown file.
+- `include`: Glob patterns for files to include.
+- `exclude`: Glob patterns for files to exclude.
+- `forceInclude`: Specific files to include regardless of exclude patterns or `.gitignore`.
+- `options`:
+  - `useGitIgnore`: If true, ignores files listed in `.gitignore`.
+  - `showTokenCount`: Displays token count in the output header.
+  - `showFileTree`: Includes a project structure tree in the output.
+  - `preamble`: Custom text instructions added to the beginning of the output file.
 
-## Known Issues
+### Example Configuration
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+```json
+{
+  "activeProfile": "default",
+  "globalSettings": {
+    "debounceMs": 3000,
+    "maxFileSizeKB": 1024,
+    "maxTotalFiles": 500,
+    "tokenizerModel": "gpt-4o"
+  },
+  "profiles": [
+    {
+      "name": "default",
+      "description": "Core source files",
+      "outputFile": ".context/context.md",
+      "include": ["src/**/*.{ts,js,json}", "README.md"],
+      "exclude": ["**/*.test.ts", "dist/**"],
+      "forceInclude": [],
+      "options": {
+        "useGitIgnore": true,
+        "removeComments": false,
+        "showTokenCount": true,
+        "showFileTree": true,
+        "preamble": "Project context for code analysis."
+      }
+    }
+  ]
+}
+```
 
-## Release Notes
+## Commands
 
-Users appreciate release notes as you update your extension.
+- `Context Builder: Init Configuration`: Creates a default configuration file.
+- `Context Builder: Select Profile`: Switches the active profile.
+- `Context Builder: Start Watching`: Enables auto-build on file changes.
+- `Context Builder: Stop Watching`: Disables auto-build.
+- `Context Builder: Build Once`: Generates the context file immediately without watching.
+- `Context Builder: Copy Output Path`: Copies the absolute path of the generated context file to the clipboard.
 
-### 1.0.0
+## Status Bar
 
-Initial release of ...
+The status bar item (bottom right) shows the current state:
 
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-- [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-- Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-- Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-- Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-- [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-- [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+- **Context: Off**: Extension is idle.
+- **[Profile Name] (X files)**: Watching for changes.
+- **Building...**: Currently generating the context file.

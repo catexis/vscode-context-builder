@@ -14,17 +14,15 @@ export class Watcher implements vscode.Disposable {
   private _state: WatcherState = WatcherState.Idle;
   private activeProfile: Profile | null = null;
 
-  private fsWatcher: vscode.FileSystemWatcher | null = null;
+  private fsWatchers: vscode.FileSystemWatcher[] = [];
   private gitIgnoreWatcher: vscode.FileSystemWatcher | null = null;
 
   private debounceTimer: NodeJS.Timeout | null = null;
   private lastStats: BuildStats | null = null;
 
-  // Concurrency control
   private isBuilding = false;
   private buildPending = false;
 
-  // Long-lived instances for the active session
   private tokenCounter: TokenCounter | null = null;
   private gitIgnoreParser: Ignore | null = null;
 
@@ -92,10 +90,8 @@ export class Watcher implements vscode.Disposable {
 
     this.activeProfile = profile;
 
-    // 1. Initialize TokenCounter once per session
     this.tokenCounter = new TokenCounter(config.globalSettings.tokenizerModel);
 
-    // 2. Initialize GitIgnore handling
     if (profile.options.useGitIgnore) {
       await this.loadGitIgnore();
       this.startGitIgnoreWatcher();
@@ -103,19 +99,22 @@ export class Watcher implements vscode.Disposable {
 
     this.setState(WatcherState.Watching);
 
-    // 3. Setup File Watcher
     const resolver = new FileResolver(this.workspaceRoot, profile, config.globalSettings, this.gitIgnoreParser);
     const patterns = resolver.getWatchPatterns();
 
-    const globPattern = patterns.length === 1 ? patterns[0] : `{${patterns.join(',')}}`;
-    const relativePattern = new vscode.RelativePattern(this.workspaceRoot, globPattern);
+    this.fsWatchers = patterns.map((pattern) => {
+      const relativePattern = new vscode.RelativePattern(this.workspaceRoot, pattern);
+      const watcher = vscode.workspace.createFileSystemWatcher(relativePattern);
 
-    this.fsWatcher = vscode.workspace.createFileSystemWatcher(relativePattern);
+      const handler = (uri: vscode.Uri) => this.handleFileEvent(uri);
+      watcher.onDidChange(handler);
+      watcher.onDidCreate(handler);
+      watcher.onDidDelete(handler);
 
-    const handler = (uri: vscode.Uri) => this.handleFileEvent(uri);
-    this.fsWatcher.onDidChange(handler);
-    this.fsWatcher.onDidCreate(handler);
-    this.fsWatcher.onDidDelete(handler);
+      return watcher;
+    });
+
+    Logger.info(`Watchers started for ${patterns.length} patterns.`);
 
     // Initial build
     this.triggerBuild();
@@ -125,8 +124,9 @@ export class Watcher implements vscode.Disposable {
     if (this.state !== WatcherState.Idle) {
       Logger.info('Stopping watcher...');
     }
-    this.fsWatcher?.dispose();
-    this.fsWatcher = null;
+
+    this.fsWatchers.forEach((w) => w.dispose());
+    this.fsWatchers = [];
 
     this.gitIgnoreWatcher?.dispose();
     this.gitIgnoreWatcher = null;
@@ -140,7 +140,6 @@ export class Watcher implements vscode.Disposable {
     this.tokenCounter = null;
     this.gitIgnoreParser = null;
 
-    // Reset flags
     this.isBuilding = false;
     this.buildPending = false;
 
@@ -154,11 +153,9 @@ export class Watcher implements vscode.Disposable {
       return;
     }
 
-    // Temporary load for single run if not watching
     const wasIdle = this.state === WatcherState.Idle;
 
     if (wasIdle || this.activeProfile?.name !== targetProfileName) {
-      // We need to setup a temporary environment for buildOnce
       const config = await this.configManager.load();
       const profile = this.configManager.getProfile(targetProfileName);
       if (!profile) return;
@@ -173,7 +170,6 @@ export class Watcher implements vscode.Disposable {
     await this.triggerBuild();
 
     if (wasIdle) {
-      // Cleanup if we were idle
       this.activeProfile = null;
       this.tokenCounter = null;
       this.gitIgnoreParser = null;
@@ -209,7 +205,7 @@ export class Watcher implements vscode.Disposable {
 
     const reload = async () => {
       await this.loadGitIgnore();
-      this.handleFileEvent(vscode.Uri.file(path.join(this.workspaceRoot, '.gitignore'))); // Trigger rebuild
+      this.handleFileEvent(vscode.Uri.file(path.join(this.workspaceRoot, '.gitignore')));
     };
 
     this.gitIgnoreWatcher.onDidChange(reload);
@@ -223,27 +219,29 @@ export class Watcher implements vscode.Disposable {
   private handleFileEvent(uri: vscode.Uri): void {
     if (!this.activeProfile) return;
 
-    const absoluteOutput = path.join(this.workspaceRoot, this.activeProfile.outputFile);
-    if (uri.fsPath === absoluteOutput) {
+    const absoluteOutput = path.normalize(path.join(this.workspaceRoot, this.activeProfile.outputFile));
+    const currentPath = path.normalize(uri.fsPath);
+
+    if (currentPath === absoluteOutput) {
       return;
     }
 
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
 
     this.setState(WatcherState.Debouncing);
 
-    this.configManager.load().then((cfg) => {
-      const delay = cfg.globalSettings.debounceMs;
-      this.debounceTimer = setTimeout(() => {
-        this.triggerBuild();
-      }, delay);
-    });
+    const delay = this.configManager.getDebounceMs();
+
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.triggerBuild();
+    }, delay);
   }
 
   private async triggerBuild(): Promise<void> {
-    // 1. Concurrency Check
     if (this.isBuilding) {
       this.buildPending = true;
       return;
@@ -257,7 +255,6 @@ export class Watcher implements vscode.Disposable {
     try {
       const config = await this.configManager.load();
 
-      // Inject cached gitIgnoreParser
       const resolver = new FileResolver(
         this.workspaceRoot,
         this.activeProfile,
@@ -268,7 +265,6 @@ export class Watcher implements vscode.Disposable {
       const files = await resolver.resolve();
       Logger.info(`Resolved ${files.length} files. Starting assembly...`);
 
-      // Inject cached tokenCounter
       const builder = new ContextBuilder(this.workspaceRoot, this.activeProfile, files, this.tokenCounter);
 
       const stats = await builder.build();
@@ -281,14 +277,11 @@ export class Watcher implements vscode.Disposable {
     } finally {
       this.isBuilding = false;
 
-      // 2. Check for pending builds during execution
       if (this.buildPending) {
         this.buildPending = false;
-        // Small delay to let event loop breathe, then retry
         setTimeout(() => this.triggerBuild(), 100);
       } else {
-        // Return to normal state
-        if (this.fsWatcher) {
+        if (this.fsWatchers.length > 0) {
           this.setState(WatcherState.Watching);
         } else {
           this.setState(WatcherState.Idle);

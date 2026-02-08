@@ -145,6 +145,10 @@ export class ConfigManager implements vscode.Disposable {
     this._onConfigChanged.dispose();
   }
 
+  public getDebounceMs(): number {
+    return this.currentConfig?.globalSettings.debounceMs || DEFAULT_DEBOUNCE_MS;
+  }
+
   private validate(config: unknown): config is ContextConfig {
     if (!config || typeof config !== 'object') return false;
 

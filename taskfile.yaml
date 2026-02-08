@@ -42,3 +42,17 @@ tasks:
       - task: fmt
       - task: checks:types
       - task: checks:lint
+
+  reinstall:
+    desc: 'Rebuild and reinstall the VS Code extension'
+    vars:
+      PUBLISHER: 'andrey'
+      EXT_NAME: 'context-builder'
+      VERSION: '0.0.1'
+      VSIX_FILE: '{{.EXT_NAME}}-{{.VERSION}}.vsix'
+    cmds:
+      - rm -f {{.VSIX_FILE}}
+      - cmd: code --uninstall-extension {{.PUBLISHER}}.{{.EXT_NAME}} --force
+        ignore_error: true
+      - npx vsce package --no-dependencies
+      - code --install-extension {{.VSIX_FILE}} --force
