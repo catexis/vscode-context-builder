@@ -126,6 +126,7 @@ export function registerCommands(
           { label: '$(play) Start Watching', description: 'Enable auto-build on file changes' },
           { label: '$(tools) Build Once', description: 'One-off build without watching' },
           { label: '$(settings-gear) Select Profile', description: 'Choose active profile' },
+          { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(file) Init Configuration', description: 'Create default config file' },
         );
       } else {
@@ -134,6 +135,7 @@ export function registerCommands(
           { label: '$(sync) Build Now', description: 'Force rebuild immediately' },
           { label: '$(clippy) Copy Output Path', description: 'Copy absolute path to clipboard' },
           { label: '$(arrow-swap) Switch Profile', description: 'Change profile and restart watcher' },
+          { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
         );
       }
 
@@ -143,7 +145,7 @@ export function registerCommands(
 
       if (!selection) return;
 
-      const label = selection.label.replace(/\$\([a-z-]+\)\s/, ''); // Remove icon
+      const label = selection.label.replace(/\$\([a-z-]+\)\s/, '');
 
       switch (label) {
         case 'Start Watching':
@@ -159,6 +161,9 @@ export function registerCommands(
         case 'Select Profile':
         case 'Switch Profile':
           vscode.commands.executeCommand('context-builder.selectProfile');
+          break;
+        case 'Create Profile':
+          vscode.commands.executeCommand('context-builder.createProfile');
           break;
         case 'Copy Output Path':
           vscode.commands.executeCommand('context-builder.copyOutputPath');

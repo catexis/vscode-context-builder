@@ -179,6 +179,44 @@ export class ConfigManager implements vscode.Disposable {
     }
   }
 
+  public async addProfile(profileName: string): Promise<void> {
+    if (!this.currentConfig) return;
+
+    if (this.getProfile(profileName)) {
+      throw new Error(`Profile "${profileName}" already exists.`);
+    }
+
+    const configPath = this.getConfigPath();
+    const content = await fs.readFile(configPath, 'utf-8');
+
+    const newProfile: Profile = {
+      name: profileName,
+      description: 'New configuration profile',
+      outputFile: `.context/${profileName}.md`,
+      include: ['src/**/*.{ts,js,json}', 'README.md'],
+      exclude: ['**/*.test.ts', 'dist/**'],
+      forceInclude: [],
+      options: {
+        useGitIgnore: true,
+        removeComments: false,
+        showTokenCount: true,
+        showFileTree: true,
+        preamble: '',
+      },
+    };
+
+    const edits = modify(content, ['profiles', -1], newProfile, {
+      formattingOptions: {
+        insertSpaces: true,
+        tabSize: 2,
+      },
+    });
+
+    const newContent = applyEdits(content, edits);
+    await fs.writeFile(configPath, newContent, 'utf-8');
+    Logger.info(`Profile "${profileName}" added to config.`);
+  }
+
   private validate(config: unknown): config is ContextConfig {
     if (!config || typeof config !== 'object') return false;
 
