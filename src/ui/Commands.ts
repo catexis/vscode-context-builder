@@ -114,6 +114,52 @@ export function registerCommands(
     }),
   );
 
+  // 8. Create Profile
+  context.subscriptions.push(
+    vscode.commands.registerCommand('context-builder.createProfile', async () => {
+      try {
+        await configManager.load(); // Ensure config is loaded
+
+        const nameInput = await vscode.window.showInputBox({
+          prompt: 'Enter profile name (leave empty for timestamp)',
+          placeHolder: 'e.g., frontend-build',
+        });
+
+        if (nameInput === undefined) return; // User cancelled
+
+        let finalName = nameInput.trim();
+
+        if (!finalName) {
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const day = String(now.getDate()).padStart(2, '0');
+          const hours = String(now.getHours()).padStart(2, '0');
+          const minutes = String(now.getMinutes()).padStart(2, '0');
+          const seconds = String(now.getSeconds()).padStart(2, '0');
+          finalName = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+        }
+
+        await configManager.addProfile(finalName);
+
+        const selection = await vscode.window.showInformationMessage(
+          `Profile "${finalName}" created. Switch to it?`,
+          'Yes',
+          'No',
+        );
+
+        if (selection === 'Yes') {
+          await configManager.updateActiveProfile(finalName);
+          await watcher.start(finalName);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to create profile: ${msg}`);
+        Logger.error('Create Profile failed', error);
+      }
+    }),
+  );
+
   // 7. Show Menu (Status Bar Interaction)
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.showMenu', async () => {
