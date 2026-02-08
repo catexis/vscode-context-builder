@@ -149,6 +149,36 @@ export class ConfigManager implements vscode.Disposable {
     return this.currentConfig?.globalSettings.debounceMs || DEFAULT_DEBOUNCE_MS;
   }
 
+  public async updateActiveProfile(profileName: string): Promise<void> {
+    if (!this.currentConfig) return;
+
+    // Don't overwrite if the profile is the same (save I/O and watcher events)
+    if (this.currentConfig.activeProfile === profileName) return;
+
+    const configPath = this.getConfigPath();
+
+    try {
+      // Read the raw file to preserve formatting (as much as possible) or structure,
+      // if the object in memory differs from the one on disk (even though we just loaded it).
+      // It's safer to read, parse, modify, and write.
+      const content = await fs.readFile(configPath, 'utf-8');
+      const configJson = JSON.parse(content);
+
+      configJson.activeProfile = profileName;
+
+      // Update the in-memory cache to avoid a race before the watcher fires
+      if (this.currentConfig) {
+        this.currentConfig.activeProfile = profileName;
+      }
+
+      await fs.writeFile(configPath, JSON.stringify(configJson, null, 2), 'utf-8');
+      Logger.info(`Updated activeProfile to "${profileName}" in config file.`);
+    } catch (error) {
+      Logger.error('Failed to update active profile in config', error);
+      vscode.window.showErrorMessage('Failed to save profile selection to config file.');
+    }
+  }
+
   private validate(config: unknown): config is ContextConfig {
     if (!config || typeof config !== 'object') return false;
 
