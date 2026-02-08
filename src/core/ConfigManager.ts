@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { modify, applyEdits } from 'jsonc-parser';
 import { ContextConfig, Profile, ProfileOptions } from '../types/config';
 import {
   CONFIG_PATH,
@@ -147,6 +148,35 @@ export class ConfigManager implements vscode.Disposable {
 
   public getDebounceMs(): number {
     return this.currentConfig?.globalSettings.debounceMs || DEFAULT_DEBOUNCE_MS;
+  }
+
+  public async updateActiveProfile(profileName: string): Promise<void> {
+    if (!this.currentConfig) return;
+
+    if (this.currentConfig.activeProfile === profileName) return;
+
+    this.currentConfig.activeProfile = profileName;
+
+    const configPath = this.getConfigPath();
+
+    try {
+      const content = await fs.readFile(configPath, 'utf-8');
+
+      const edits = modify(content, ['activeProfile'], profileName, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      });
+
+      const newContent = applyEdits(content, edits);
+
+      await fs.writeFile(configPath, newContent, 'utf-8');
+      Logger.info(`Updated activeProfile to "${profileName}" in config file using jsonc-parser.`);
+    } catch (error) {
+      Logger.error('Failed to update active profile in config', error);
+      vscode.window.showErrorMessage('Failed to save profile selection to config file.');
+    }
   }
 
   private validate(config: unknown): config is ContextConfig {

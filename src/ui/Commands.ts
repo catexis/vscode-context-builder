@@ -39,6 +39,7 @@ export function registerCommands(
 
       if (selected) {
         await watcher.start(selected.label);
+        await configManager.updateActiveProfile(selected.label);
       }
     }),
   );
