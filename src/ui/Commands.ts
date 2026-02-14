@@ -114,6 +114,52 @@ export function registerCommands(
     }),
   );
 
+  // 8. Create Profile
+  context.subscriptions.push(
+    vscode.commands.registerCommand('context-builder.createProfile', async () => {
+      try {
+        await configManager.load(); // Ensure config is loaded
+
+        const nameInput = await vscode.window.showInputBox({
+          prompt: 'Enter profile name (leave empty for timestamp)',
+          placeHolder: 'e.g., frontend-build',
+        });
+
+        if (nameInput === undefined) return; // User cancelled
+
+        let finalName = nameInput.trim();
+
+        if (!finalName) {
+          const now = new Date();
+          const year = now.getFullYear();
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const day = String(now.getDate()).padStart(2, '0');
+          const hours = String(now.getHours()).padStart(2, '0');
+          const minutes = String(now.getMinutes()).padStart(2, '0');
+          const seconds = String(now.getSeconds()).padStart(2, '0');
+          finalName = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+        }
+
+        await configManager.addProfile(finalName);
+
+        const selection = await vscode.window.showInformationMessage(
+          `Profile "${finalName}" created. Switch to it?`,
+          'Yes',
+          'No',
+        );
+
+        if (selection === 'Yes') {
+          await configManager.updateActiveProfile(finalName);
+          await watcher.start(finalName);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to create profile: ${msg}`);
+        Logger.error('Create Profile failed', error);
+      }
+    }),
+  );
+
   // 7. Show Menu (Status Bar Interaction)
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.showMenu', async () => {
@@ -126,6 +172,7 @@ export function registerCommands(
           { label: '$(play) Start Watching', description: 'Enable auto-build on file changes' },
           { label: '$(tools) Build Once', description: 'One-off build without watching' },
           { label: '$(settings-gear) Select Profile', description: 'Choose active profile' },
+          { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(file) Init Configuration', description: 'Create default config file' },
         );
       } else {
@@ -134,6 +181,7 @@ export function registerCommands(
           { label: '$(sync) Build Now', description: 'Force rebuild immediately' },
           { label: '$(clippy) Copy Output Path', description: 'Copy absolute path to clipboard' },
           { label: '$(arrow-swap) Switch Profile', description: 'Change profile and restart watcher' },
+          { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
         );
       }
 
@@ -143,7 +191,7 @@ export function registerCommands(
 
       if (!selection) return;
 
-      const label = selection.label.replace(/\$\([a-z-]+\)\s/, ''); // Remove icon
+      const label = selection.label.replace(/\$\([a-z-]+\)\s/, '');
 
       switch (label) {
         case 'Start Watching':
@@ -159,6 +207,9 @@ export function registerCommands(
         case 'Select Profile':
         case 'Switch Profile':
           vscode.commands.executeCommand('context-builder.selectProfile');
+          break;
+        case 'Create Profile':
+          vscode.commands.executeCommand('context-builder.createProfile');
           break;
         case 'Copy Output Path':
           vscode.commands.executeCommand('context-builder.copyOutputPath');

@@ -50,6 +50,11 @@
         "command": "context-builder.showMenu",
         "title": "Show Menu",
         "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.createProfile",
+        "title": "Create Profile",
+        "category": "Context Builder"
       }
     ]
   },
