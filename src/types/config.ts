@@ -23,8 +23,12 @@ export interface Profile {
   options: ProfileOptions;
 }
 
-export interface ContextConfig {
-  activeProfile: string;
+export interface FileConfig {
   globalSettings: GlobalSettings;
   profiles: Profile[];
+}
+
+export interface ContextConfig extends FileConfig {
+  activeProfile: string;
+  watcherEnabled: boolean;
 }
