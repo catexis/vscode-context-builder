@@ -266,6 +266,57 @@ export class ConfigManager implements vscode.Disposable {
     Logger.info(`Profile "${profileName}" added to config.`);
   }
 
+  public async removeProfile(profileName: string): Promise<void> {
+    const configPath = this.getConfigPath();
+    let content = await fs.readFile(configPath, 'utf-8');
+
+    // Load current config to determine index and remaining profiles
+    // We explicitly reload to ensure we are working with the latest state on disk
+    const config = await this.load();
+
+    if (config.profiles.length <= 1) {
+      throw new Error('Cannot delete the last remaining profile.');
+    }
+
+    const profileIndex = config.profiles.findIndex((p) => p.name === profileName);
+    if (profileIndex === -1) {
+      throw new Error(`Profile "${profileName}" not found.`);
+    }
+
+    // 1. Remove profile from array
+    const removeEdits = modify(content, ['profiles', profileIndex], undefined, {
+      formattingOptions: {
+        insertSpaces: true,
+        tabSize: 2,
+      },
+    });
+
+    content = applyEdits(content, removeEdits);
+
+    // 2. Handle Active Profile Switch if needed
+    if (config.activeProfile === profileName) {
+      const remainingProfiles = config.profiles.filter((p) => p.name !== profileName);
+      // Fallback to the first available profile
+      const newActiveProfile = remainingProfiles[0].name;
+
+      const updateActiveEdits = modify(content, ['activeProfile'], newActiveProfile, {
+        formattingOptions: {
+          insertSpaces: true,
+          tabSize: 2,
+        },
+      });
+
+      content = applyEdits(content, updateActiveEdits);
+
+      // Update Memento immediately to keep sync
+      await this.memento.update(KEY_ACTIVE_PROFILE, newActiveProfile);
+      Logger.info(`Active profile automatically switched to "${newActiveProfile}" after deletion.`);
+    }
+
+    await fs.writeFile(configPath, content, 'utf-8');
+    Logger.info(`Profile "${profileName}" removed from config.`);
+  }
+
   private validateFileConfig(config: unknown): config is FileConfig {
     if (!config || typeof config !== 'object') return false;
 

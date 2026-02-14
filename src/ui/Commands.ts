@@ -104,7 +104,7 @@ export function registerCommands(
     }),
   );
 
-  // 8. Create Profile
+  // 7. Create Profile
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.createProfile', async () => {
       try {
@@ -149,7 +149,47 @@ export function registerCommands(
     }),
   );
 
-  // 7. Show Menu (Status Bar Interaction)
+  // 8. Remove Profile
+  context.subscriptions.push(
+    vscode.commands.registerCommand('context-builder.removeProfile', async () => {
+      try {
+        const config = await configManager.load();
+
+        if (config.profiles.length <= 1) {
+          vscode.window.showWarningMessage('Cannot delete the last remaining profile.');
+          return;
+        }
+
+        const items = config.profiles.map((p) => ({
+          label: p.name,
+          description: p.description,
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a profile to delete',
+        });
+
+        if (!selected) return;
+
+        const answer = await vscode.window.showWarningMessage(
+          `Are you sure you want to delete profile "${selected.label}"?`,
+          'Yes',
+          'No',
+        );
+
+        if (answer === 'Yes') {
+          await configManager.removeProfile(selected.label);
+          vscode.window.showInformationMessage(`Profile "${selected.label}" removed.`);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to remove profile: ${msg}`);
+        Logger.error('Remove Profile failed', error);
+      }
+    }),
+  );
+
+  // 9. Show Menu (Status Bar Interaction)
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.showMenu', async () => {
       const isIdle = watcher.state === WatcherState.Idle;
@@ -162,6 +202,7 @@ export function registerCommands(
           { label: '$(tools) Build Once', description: 'One-off build without watching' },
           { label: '$(settings-gear) Select Profile', description: 'Choose active profile' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
+          { label: '$(trash) Delete Profile', description: 'Remove a configuration profile' },
           { label: '$(file) Init Configuration', description: 'Create default config file' },
           { label: '$(root-folder) Switch Workspace', description: 'Change monitored workspace folder' },
         );
@@ -172,6 +213,7 @@ export function registerCommands(
           { label: '$(clippy) Copy Output Path', description: 'Copy absolute path to clipboard' },
           { label: '$(arrow-swap) Switch Profile', description: 'Change profile and restart watcher' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
+          { label: '$(trash) Delete Profile', description: 'Remove a configuration profile' },
           { label: '$(root-folder) Switch Workspace', description: 'Change monitored workspace folder' },
         );
       }
@@ -201,6 +243,9 @@ export function registerCommands(
           break;
         case 'Create Profile':
           vscode.commands.executeCommand('context-builder.createProfile');
+          break;
+        case 'Delete Profile':
+          vscode.commands.executeCommand('context-builder.removeProfile');
           break;
         case 'Copy Output Path':
           vscode.commands.executeCommand('context-builder.copyOutputPath');
