@@ -102,7 +102,7 @@ export class ConfigManager implements vscode.Disposable {
         {
           name: 'default',
           description: 'Default context profile',
-          outputFile: '.context/context.md',
+          outputFile: `.context/context.md`,
           include: ['src/**/*.{ts,js,py,md}', 'package.json', 'README.md'],
           exclude: ['**/*.test.ts'],
           forceInclude: [],
@@ -140,12 +140,21 @@ export class ConfigManager implements vscode.Disposable {
 
     const reload = async () => {
       try {
-        Logger.info('Config file changed/created. Reloading...');
+        Logger.info('Config file event detected. Reloading...');
         const config = await this.load();
         this._onConfigChanged.fire(config);
         Logger.info(`Config loaded. Active profile: ${config.activeProfile}`);
       } catch (error) {
         this._onConfigChanged.fire(null);
+
+        // Handle missing file gracefully (User might have just switched workspace)
+        const err = error as { code?: string; message: string };
+        if (err.code === 'ENOENT') {
+          Logger.info('Config file not found. Waiting for creation...');
+          // Do not show error message to user, just log it
+          return;
+        }
+
         Logger.error('Config reload failed', error);
 
         const message = error instanceof Error ? error.message : String(error);

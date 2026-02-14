@@ -84,7 +84,28 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     });
 
+    // Check if config exists, if not - prompt user
+    if (!(await configManager.exists())) {
+      const selection = await vscode.window.showInformationMessage(
+        'Context Builder configuration missing in this workspace. Create default?',
+        'Yes',
+        'No',
+      );
+
+      if (selection === 'Yes') {
+        try {
+          await configManager.createDefault();
+          // The watcher will pick up the file creation automatically
+          vscode.window.showInformationMessage('Configuration created.');
+        } catch (error) {
+          vscode.window.showErrorMessage('Failed to create configuration.');
+          Logger.error('Failed to create default config', error);
+        }
+      }
+    }
+
     // Start watching for config changes.
+    // If config does not exist and user said "No", this will silently wait for file creation.
     configManager.startWatching();
   };
 
