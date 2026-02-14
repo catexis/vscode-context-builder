@@ -165,6 +165,7 @@ export function registerCommands(
           { label: '$(settings-gear) Select Profile', description: 'Choose active profile' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(file) Init Configuration', description: 'Create default config file' },
+          { label: '$(root-folder) Switch Workspace', description: 'Change monitored workspace folder' },
         );
       } else {
         items.push(
@@ -173,6 +174,7 @@ export function registerCommands(
           { label: '$(clippy) Copy Output Path', description: 'Copy absolute path to clipboard' },
           { label: '$(arrow-swap) Switch Profile', description: 'Change profile and restart watcher' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
+          { label: '$(root-folder) Switch Workspace', description: 'Change monitored workspace folder' },
         );
       }
 
@@ -207,6 +209,9 @@ export function registerCommands(
           break;
         case 'Init Configuration':
           vscode.commands.executeCommand('context-builder.initConfig');
+          break;
+        case 'Switch Workspace':
+          vscode.commands.executeCommand('context-builder.switchWorkspace');
           break;
       }
     }),

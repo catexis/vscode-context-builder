@@ -27,6 +27,11 @@
         "category": "Context Builder"
       },
       {
+        "command": "context-builder.switchWorkspace",
+        "title": "Switch Workspace",
+        "category": "Context Builder"
+      },
+      {
         "command": "context-builder.startWatching",
         "title": "Start Watching",
         "category": "Context Builder"
