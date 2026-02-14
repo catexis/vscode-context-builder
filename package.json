@@ -60,6 +60,11 @@
         "command": "context-builder.createProfile",
         "title": "Create Profile",
         "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.removeProfile",
+        "title": "Remove Profile",
+        "category": "Context Builder"
       }
     ]
   },
