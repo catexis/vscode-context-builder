@@ -35,13 +35,12 @@ export function registerCommands(
         }));
 
         const selected = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select a profile to start watching',
+          placeHolder: 'Select a profile',
         });
 
         if (selected) {
-          // Update profile first, then enable watcher via ConfigManager (activates Watcher automatically)
+          // Update profile only. Watcher state (enabled/disabled) remains unchanged.
           await configManager.updateActiveProfile(selected.label);
-          await configManager.setWatcherEnabled(true);
         }
       } catch (error) {
         Logger.error('Failed to select profile', error);
@@ -141,7 +140,6 @@ export function registerCommands(
 
         if (selection === 'Yes') {
           await configManager.updateActiveProfile(finalName);
-          await configManager.setWatcherEnabled(true);
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
