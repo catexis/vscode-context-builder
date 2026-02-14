@@ -2,12 +2,14 @@ import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { modify, applyEdits } from 'jsonc-parser';
-import { ContextConfig, Profile, ProfileOptions } from '../types/config';
+import { ContextConfig, FileConfig, Profile, ProfileOptions } from '../types/config';
 import {
   CONFIG_PATH,
   DEFAULT_DEBOUNCE_MS,
   DEFAULT_MAX_FILE_SIZE_KB,
   DEFAULT_MAX_TOTAL_FILES,
+  KEY_ACTIVE_PROFILE,
+  KEY_WATCHER_ENABLED,
 } from '../utils/constants';
 import { Logger } from '../utils/Logger';
 
@@ -18,7 +20,10 @@ export class ConfigManager implements vscode.Disposable {
 
   private currentConfig: ContextConfig | null = null;
 
-  constructor(private readonly workspaceRoot: string) {}
+  constructor(
+    private readonly workspaceRoot: string,
+    private readonly memento: vscode.Memento,
+  ) {}
 
   public getConfigPath(): string {
     return path.join(this.workspaceRoot, CONFIG_PATH);
@@ -37,14 +42,38 @@ export class ConfigManager implements vscode.Disposable {
     const configPath = this.getConfigPath();
     try {
       const content = await fs.readFile(configPath, 'utf-8');
-      const parsed = JSON.parse(content);
+      const parsedFileConfig = JSON.parse(content);
 
-      if (!this.validate(parsed)) {
+      if (!this.validateFileConfig(parsedFileConfig)) {
         throw new Error('Invalid configuration structure');
       }
 
-      this.currentConfig = parsed;
-      return parsed;
+      // Merge file config with Memento state
+      const activeProfileName = this.memento.get<string>(KEY_ACTIVE_PROFILE);
+      const watcherEnabled = this.memento.get<boolean>(KEY_WATCHER_ENABLED, false);
+
+      // Resolve active profile
+      let finalActiveProfile = activeProfileName;
+      if (!finalActiveProfile || !parsedFileConfig.profiles.find((p: Profile) => p.name === finalActiveProfile)) {
+        if (parsedFileConfig.profiles.length > 0) {
+          finalActiveProfile = parsedFileConfig.profiles[0].name;
+        } else {
+          finalActiveProfile = '';
+        }
+        // Update memento if we fell back to default
+        if (finalActiveProfile) {
+          await this.memento.update(KEY_ACTIVE_PROFILE, finalActiveProfile);
+        }
+      }
+
+      const fullConfig: ContextConfig = {
+        ...parsedFileConfig,
+        activeProfile: finalActiveProfile,
+        watcherEnabled: watcherEnabled,
+      };
+
+      this.currentConfig = fullConfig;
+      return fullConfig;
     } catch (error) {
       this.currentConfig = null;
       throw error;
@@ -61,8 +90,8 @@ export class ConfigManager implements vscode.Disposable {
   }
 
   public async createDefault(): Promise<void> {
-    const defaultConfig: ContextConfig = {
-      activeProfile: 'default',
+    // We only write FileConfig to disk
+    const defaultConfig: FileConfig = {
       globalSettings: {
         debounceMs: DEFAULT_DEBOUNCE_MS,
         maxFileSizeKB: DEFAULT_MAX_FILE_SIZE_KB,
@@ -93,6 +122,10 @@ export class ConfigManager implements vscode.Disposable {
 
     await fs.mkdir(configDir, { recursive: true });
     await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+
+    // Reset state
+    await this.memento.update(KEY_ACTIVE_PROFILE, 'default');
+    await this.memento.update(KEY_WATCHER_ENABLED, false);
   }
 
   public startWatching(): void {
@@ -113,7 +146,6 @@ export class ConfigManager implements vscode.Disposable {
         Logger.info(`Config loaded. Active profile: ${config.activeProfile}`);
       } catch (error) {
         this._onConfigChanged.fire(null);
-        // Log error but do not steal focus, relying on UI notification instead
         Logger.error('Config reload failed', error);
 
         const message = error instanceof Error ? error.message : String(error);
@@ -151,43 +183,51 @@ export class ConfigManager implements vscode.Disposable {
   }
 
   public async updateActiveProfile(profileName: string): Promise<void> {
-    if (!this.currentConfig) return;
+    if (this.currentConfig && this.currentConfig.activeProfile === profileName) return;
 
-    if (this.currentConfig.activeProfile === profileName) return;
+    // Update Memento
+    await this.memento.update(KEY_ACTIVE_PROFILE, profileName);
+    Logger.info(`Updated activeProfile to "${profileName}" in Memento.`);
 
-    this.currentConfig.activeProfile = profileName;
+    // Refresh internal state and notify listeners
+    if (this.currentConfig) {
+      this.currentConfig.activeProfile = profileName;
+      this._onConfigChanged.fire(this.currentConfig);
+    } else {
+      // If config wasn't loaded, try loading it now
+      try {
+        const config = await this.load();
+        this._onConfigChanged.fire(config);
+      } catch (e) {
+        // Ignore load error here
+      }
+    }
+  }
 
-    const configPath = this.getConfigPath();
+  public async setWatcherEnabled(enabled: boolean): Promise<void> {
+    if (this.currentConfig && this.currentConfig.watcherEnabled === enabled) return;
 
-    try {
-      const content = await fs.readFile(configPath, 'utf-8');
+    await this.memento.update(KEY_WATCHER_ENABLED, enabled);
+    Logger.info(`Updated watcherEnabled to "${enabled}" in Memento.`);
 
-      const edits = modify(content, ['activeProfile'], profileName, {
-        formattingOptions: {
-          insertSpaces: true,
-          tabSize: 2,
-        },
-      });
-
-      const newContent = applyEdits(content, edits);
-
-      await fs.writeFile(configPath, newContent, 'utf-8');
-      Logger.info(`Updated activeProfile to "${profileName}" in config file using jsonc-parser.`);
-    } catch (error) {
-      Logger.error('Failed to update active profile in config', error);
-      vscode.window.showErrorMessage('Failed to save profile selection to config file.');
+    if (this.currentConfig) {
+      this.currentConfig.watcherEnabled = enabled;
+      this._onConfigChanged.fire(this.currentConfig);
+    } else {
+      try {
+        const config = await this.load();
+        this._onConfigChanged.fire(config);
+      } catch (e) {}
     }
   }
 
   public async addProfile(profileName: string): Promise<void> {
-    if (!this.currentConfig) return;
+    const configPath = this.getConfigPath();
+    const content = await fs.readFile(configPath, 'utf-8');
 
     if (this.getProfile(profileName)) {
       throw new Error(`Profile "${profileName}" already exists.`);
     }
-
-    const configPath = this.getConfigPath();
-    const content = await fs.readFile(configPath, 'utf-8');
 
     const newProfile: Profile = {
       name: profileName,
@@ -217,7 +257,7 @@ export class ConfigManager implements vscode.Disposable {
     Logger.info(`Profile "${profileName}" added to config.`);
   }
 
-  private validate(config: unknown): config is ContextConfig {
+  private validateFileConfig(config: unknown): config is FileConfig {
     if (!config || typeof config !== 'object') return false;
 
     // Safe cast to access properties for check
@@ -235,9 +275,6 @@ export class ConfigManager implements vscode.Disposable {
     ) {
       return false;
     }
-
-    // Validate activeProfile
-    if (typeof c.activeProfile !== 'string') return false;
 
     // Validate profiles array
     if (!Array.isArray(c.profiles)) return false;

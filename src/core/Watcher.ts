@@ -37,30 +37,33 @@ export class Watcher implements vscode.Disposable {
     private readonly configManager: ConfigManager,
   ) {
     this.configManager.onDidChangeConfig((config) => {
+      // 1. Invalid config
       if (!config) {
         this.stop();
-        vscode.window.showErrorMessage('Context Builder: Configuration is invalid. Watching stopped.');
         return;
       }
 
-      if (this.state !== WatcherState.Idle && this.activeProfile) {
-        const stillExists = config.profiles.find((p) => p.name === this.activeProfile?.name);
-        if (stillExists) {
-          this.start(stillExists.name);
-        } else {
+      // 2. Watcher disabled
+      if (!config.watcherEnabled) {
+        if (this.state !== WatcherState.Idle) {
+          Logger.info('Watcher disabled. Stopping...');
           this.stop();
-          vscode.window.showWarningMessage(
-            `Context Builder: Profile "${this.activeProfile.name}" no longer exists. Watching stopped.`,
-          );
         }
+        return;
       }
 
-      if (this.state === WatcherState.Idle && config.activeProfile) {
-        const profile = config.profiles.find((p) => p.name === config.activeProfile);
-        if (profile) {
-          this.start(config.activeProfile);
-        }
+      // 3. Watcher enabled - Check Profile
+      const profileName = config.activeProfile;
+      const profile = config.profiles.find((p) => p.name === profileName);
+
+      if (!profile) {
+        Logger.warn(`Active profile "${profileName}" not found in config.`);
+        this.stop();
+        return;
       }
+
+      // 4. Start or Restart (to apply potential config changes)
+      this.startInternal(profileName);
     });
   }
 
@@ -76,7 +79,7 @@ export class Watcher implements vscode.Disposable {
     return this.activeProfile;
   }
 
-  public async start(profileName: string): Promise<void> {
+  private async startInternal(profileName: string): Promise<void> {
     Logger.info(`Starting watcher for profile: "${profileName}"`);
     const config = await this.configManager.load();
     const profile = this.configManager.getProfile(profileName);
@@ -147,7 +150,9 @@ export class Watcher implements vscode.Disposable {
   }
 
   public async buildOnce(profileName?: string): Promise<void> {
-    const targetProfileName = profileName || this.activeProfile?.name;
+    const config = await this.configManager.load();
+    const targetProfileName = profileName || config.activeProfile;
+
     if (!targetProfileName) {
       vscode.window.showErrorMessage('No profile selected for build.');
       return;
@@ -155,10 +160,13 @@ export class Watcher implements vscode.Disposable {
 
     const wasIdle = this.state === WatcherState.Idle;
 
+    // Temporarily setup context if idle
     if (wasIdle || this.activeProfile?.name !== targetProfileName) {
-      const config = await this.configManager.load();
       const profile = this.configManager.getProfile(targetProfileName);
-      if (!profile) return;
+      if (!profile) {
+        vscode.window.showErrorMessage(`Profile "${targetProfileName}" not found.`);
+        return;
+      }
 
       this.activeProfile = profile;
       this.tokenCounter = new TokenCounter(config.globalSettings.tokenizerModel);
@@ -169,6 +177,7 @@ export class Watcher implements vscode.Disposable {
 
     await this.triggerBuild();
 
+    // Cleanup if we were idle
     if (wasIdle) {
       this.activeProfile = null;
       this.tokenCounter = null;

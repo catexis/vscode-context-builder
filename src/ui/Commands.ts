@@ -27,19 +27,25 @@ export function registerCommands(
   // 2. Select Profile
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.selectProfile', async () => {
-      const config = await configManager.load();
-      const items = config.profiles.map((p) => ({
-        label: p.name,
-        description: p.description,
-      }));
+      try {
+        const config = await configManager.load();
+        const items = config.profiles.map((p) => ({
+          label: p.name,
+          description: p.description,
+        }));
 
-      const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select a profile to start watching',
-      });
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select a profile to start watching',
+        });
 
-      if (selected) {
-        await watcher.start(selected.label);
-        await configManager.updateActiveProfile(selected.label);
+        if (selected) {
+          // Update profile first, then enable watcher via ConfigManager (activates Watcher automatically)
+          await configManager.updateActiveProfile(selected.label);
+          await configManager.setWatcherEnabled(true);
+        }
+      } catch (error) {
+        Logger.error('Failed to select profile', error);
+        vscode.window.showErrorMessage('Failed to load profiles. Check config.');
       }
     }),
   );
@@ -47,31 +53,16 @@ export function registerCommands(
   // 3. Start Watching
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.startWatching', async () => {
-      const config = await configManager.load();
-      let profileName = config.activeProfile;
-
-      // If active profile is not found in profiles list, try first available
-      const profileExists = config.profiles.find((p) => p.name === profileName);
-
-      if (!profileExists) {
-        if (config.profiles.length > 0) {
-          profileName = config.profiles[0].name;
-        } else {
-          vscode.window.showErrorMessage('No profiles defined in config.');
-          return;
-        }
-      }
-
-      await watcher.start(profileName);
-      vscode.window.showInformationMessage(`Context Builder: Watching profile "${profileName}"`);
+      await configManager.setWatcherEnabled(true);
+      vscode.window.showInformationMessage('Context Builder: Watching enabled.');
     }),
   );
 
   // 4. Stop Watching
   context.subscriptions.push(
-    vscode.commands.registerCommand('context-builder.stopWatching', () => {
-      watcher.stop();
-      vscode.window.showInformationMessage('Context Builder: Stopped.');
+    vscode.commands.registerCommand('context-builder.stopWatching', async () => {
+      await configManager.setWatcherEnabled(false);
+      vscode.window.showInformationMessage('Context Builder: Watching stopped.');
     }),
   );
 
@@ -150,7 +141,7 @@ export function registerCommands(
 
         if (selection === 'Yes') {
           await configManager.updateActiveProfile(finalName);
-          await watcher.start(finalName);
+          await configManager.setWatcherEnabled(true);
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);

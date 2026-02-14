@@ -37,7 +37,8 @@ export async function activate(context: vscode.ExtensionContext) {
   Logger.info(`Selected workspace root: ${workspaceRoot}`);
 
   // Initialize Core Components
-  const configManager = new ConfigManager(workspaceRoot);
+  // Pass workspaceState for Memento storage
+  const configManager = new ConfigManager(workspaceRoot, context.workspaceState);
   // Watcher subscribes to configManager.onDidChangeConfig in its constructor
   const watcher = new Watcher(workspaceRoot, configManager);
 
