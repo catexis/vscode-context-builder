@@ -20,6 +20,10 @@ export async function activate(context: vscode.ExtensionContext) {
     return;
   }
 
+  // Initialize UI immediately so it's visible regardless of selection state
+  const statusBar = new StatusBar();
+  context.subscriptions.push(statusBar);
+
   const switchWorkspace = async () => {
     const selectedFolder = await vscode.window.showWorkspaceFolderPick({
       placeHolder: 'Context Builder: Select workspace folder to monitor',
@@ -28,6 +32,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
     if (selectedFolder) {
       await startSession(selectedFolder.uri.fsPath);
+    } else {
+      // User cancelled picker
+      // Check if we have an active session. If not, ensure status bar prompts for selection.
+      const currentRoot = context.workspaceState.get<string>(KEY_SELECTED_WORKSPACE);
+      if (!currentRoot) {
+        statusBar.showSelectWorkspace();
+      }
     }
   };
 
@@ -48,25 +59,41 @@ export async function activate(context: vscode.ExtensionContext) {
     await context.workspaceState.update(KEY_SELECTED_WORKSPACE, workspaceRoot);
 
     // Initialize Core Components
-    // Pass workspaceState for Memento storage
     const configManager = new ConfigManager(workspaceRoot, context.workspaceState);
     const watcher = new Watcher(workspaceRoot, configManager);
 
-    // Initialize UI
-    const statusBar = new StatusBar();
+    // Bind StatusBar to Session (Reset command to menu)
+    statusBar.setCommand('context-builder.showMenu');
+    // Ensure it shows Idle state initially
+    statusBar.update(WatcherState.Idle);
 
-    // Create a proxy context to capture subscriptions for this session
-    // This ensures commands are disposed when the session changes
+    // Create a proxy context to capture subscriptions for this session.
+    // NOTE: We DO NOT use `...context` here because spreading the context object triggers
+    // access to proposed APIs (like extensionRuntime) which causes a crash.
+    // We only explicitly pass properties required by registerCommands.
     const sessionContext = {
-      ...context,
       subscriptions: sessionDisposables,
+      workspaceState: context.workspaceState,
+      extensionPath: context.extensionPath,
+      extensionUri: context.extensionUri,
+      storageUri: context.storageUri,
+      globalState: context.globalState,
+      secrets: context.secrets,
+      extensionMode: context.extensionMode,
+      asAbsolutePath: context.asAbsolutePath.bind(context),
+      environmentVariableCollection: context.environmentVariableCollection,
+      logUri: context.logUri,
+      storagePath: context.storagePath,
+      globalStorageUri: context.globalStorageUri,
+      logPath: context.logPath,
     } as vscode.ExtensionContext;
 
-    // Initialize Commands
+    // Initialize Commands (registering context-builder.showMenu happens here)
     registerCommands(sessionContext, watcher, configManager, workspaceRoot);
 
     // Add core components to session disposables
-    sessionDisposables.push(configManager, watcher, statusBar);
+    // NOTE: statusBar is NOT here, it is global.
+    sessionDisposables.push(configManager, watcher);
 
     // Hook up Status Bar to Watcher events
     watcher.onStateChange((state) => {
@@ -95,7 +122,6 @@ export async function activate(context: vscode.ExtensionContext) {
       if (selection === 'Yes') {
         try {
           await configManager.createDefault();
-          // The watcher will pick up the file creation automatically
           vscode.window.showInformationMessage('Configuration created.');
         } catch (error) {
           vscode.window.showErrorMessage('Failed to create configuration.');
@@ -104,8 +130,6 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    // Start watching for config changes.
-    // If config does not exist and user said "No", this will silently wait for file creation.
     configManager.startWatching();
   };
 
@@ -113,6 +137,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const savedRoot = context.workspaceState.get<string>(KEY_SELECTED_WORKSPACE);
   let initialRoot: string | undefined;
 
+  // Validate saved root exists in current folders
   if (savedRoot && workspaceFolders.some((f) => f.uri.fsPath === savedRoot)) {
     initialRoot = savedRoot;
   } else if (workspaceFolders.length === 1) {
@@ -122,7 +147,8 @@ export async function activate(context: vscode.ExtensionContext) {
   if (initialRoot) {
     await startSession(initialRoot);
   } else {
-    // If no saved root and multiple folders, prompt user
+    // If no saved root and multiple folders
+    statusBar.showSelectWorkspace();
     await switchWorkspace();
   }
 }

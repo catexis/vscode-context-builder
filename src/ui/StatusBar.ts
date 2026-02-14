@@ -11,6 +11,10 @@ export class StatusBar implements vscode.Disposable {
     this.statusBarItem.show();
   }
 
+  public setCommand(command: string): void {
+    this.statusBarItem.command = command;
+  }
+
   public update(state: WatcherState, profileName?: string, fileCount?: number): void {
     switch (state) {
       case WatcherState.Idle:
@@ -34,6 +38,12 @@ export class StatusBar implements vscode.Disposable {
         this.statusBarItem.tooltip = 'Generating context file...';
         break;
     }
+  }
+
+  public showSelectWorkspace(): void {
+    this.statusBarItem.text = '$(root-folder) Context: Select Workspace';
+    this.statusBarItem.tooltip = 'Click to select a workspace folder to monitor';
+    this.statusBarItem.command = 'context-builder.switchWorkspace';
   }
 
   public dispose(): void {
