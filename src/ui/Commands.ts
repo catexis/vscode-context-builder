@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Watcher } from '../core/Watcher';
-import { ConfigManager } from '../core/ConfigManager';
+import { ConfigManager, FORMAT_EXTENSION_MAP } from '../core/ConfigManager';
 import { WatcherState } from '../types/state';
+import { OutputFormat } from '../types/config';
 import { Logger } from '../utils/Logger';
 
 export function registerCommands(
@@ -190,17 +191,22 @@ export function registerCommands(
           return;
         }
 
-        const items: vscode.QuickPickItem[] = [
-          { label: 'markdown', description: 'Standard Markdown output' },
-          { label: 'xml', description: 'Structured XML output' },
-        ];
+        const formatDescriptions: Record<string, string> = {
+          markdown: 'Standard Markdown output',
+          xml: 'Structured XML output',
+        };
+
+        const items: vscode.QuickPickItem[] = Object.keys(FORMAT_EXTENSION_MAP).map((format) => ({
+          label: format,
+          description: formatDescriptions[format] || `${format} output format`,
+        }));
 
         const selected = await vscode.window.showQuickPick(items, {
           placeHolder: `Select output format for profile "${profileName}"`,
         });
 
         if (selected) {
-          await configManager.updateProfileFormat(profileName, selected.label as 'markdown' | 'xml');
+          await configManager.updateProfileFormat(profileName, selected.label as OutputFormat);
           vscode.window.showInformationMessage(
             `Output format changed to ${selected.label} for profile "${profileName}".`,
           );
@@ -224,7 +230,7 @@ export function registerCommands(
           { label: '$(play) Start Watching', description: 'Enable auto-build on file changes' },
           { label: '$(tools) Build Once', description: 'One-off build without watching' },
           { label: '$(settings-gear) Select Profile', description: 'Choose active profile' },
-          { label: '$(code) Select Format', description: 'Change output format (Markdown/XML)' },
+          { label: '$(code) Select Format', description: 'Change output format' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(trash) Delete Profile', description: 'Remove a configuration profile' },
           { label: '$(file) Init Configuration', description: 'Create default config file' },
@@ -236,7 +242,7 @@ export function registerCommands(
           { label: '$(sync) Build Now', description: 'Force rebuild immediately' },
           { label: '$(clippy) Copy Output Path', description: 'Copy absolute path to clipboard' },
           { label: '$(arrow-swap) Switch Profile', description: 'Change profile and restart watcher' },
-          { label: '$(code) Select Format', description: 'Change output format (Markdown/XML)' },
+          { label: '$(code) Select Format', description: 'Change output format' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(trash) Delete Profile', description: 'Remove a configuration profile' },
           { label: '$(root-folder) Switch Workspace', description: 'Change monitored workspace folder' },

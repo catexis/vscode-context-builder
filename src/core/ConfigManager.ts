@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { modify, applyEdits } from 'jsonc-parser';
-import { ContextConfig, FileConfig, Profile, ProfileOptions } from '../types/config';
+import { ContextConfig, FileConfig, Profile, ProfileOptions, OutputFormat } from '../types/config';
 import {
   CONFIG_PATH,
   DEFAULT_DEBOUNCE_MS,
@@ -12,6 +12,13 @@ import {
   KEY_WATCHER_ENABLED,
 } from '../utils/constants';
 import { Logger } from '../utils/Logger';
+
+export const FORMAT_EXTENSION_MAP: Record<OutputFormat, string> = {
+  markdown: '.md',
+  xml: '.xml',
+};
+
+const SUPPORTED_FORMATS = Object.keys(FORMAT_EXTENSION_MAP);
 
 export class ConfigManager implements vscode.Disposable {
   private configWatcher: vscode.FileSystemWatcher | null = null;
@@ -308,7 +315,7 @@ export class ConfigManager implements vscode.Disposable {
     Logger.info(`Profile "${profileName}" removed from config.`);
   }
 
-  public async updateProfileFormat(profileName: string, format: 'markdown' | 'xml'): Promise<void> {
+  public async updateProfileFormat(profileName: string, format: OutputFormat): Promise<void> {
     const configPath = this.getConfigPath();
     let content = await fs.readFile(configPath, 'utf-8');
     const config = await this.load();
@@ -318,17 +325,19 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" not found.`);
     }
 
+    const currentFormat: OutputFormat = config.profiles[profileIndex].options.outputFormat || 'markdown';
+
     const edits = modify(content, ['profiles', profileIndex, 'options', 'outputFormat'], format, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     });
 
     content = applyEdits(content, edits);
 
-    const oldExt = format === 'xml' ? '.md' : '.xml';
-    const newExt = format === 'xml' ? '.xml' : '.md';
+    const oldExt = FORMAT_EXTENSION_MAP[currentFormat];
+    const newExt = FORMAT_EXTENSION_MAP[format];
     const currentOutputFile = config.profiles[profileIndex].outputFile;
 
-    if (currentOutputFile.endsWith(oldExt)) {
+    if (oldExt && newExt && currentOutputFile.endsWith(oldExt)) {
       const newOutputFile = currentOutputFile.slice(0, -oldExt.length) + newExt;
       const fileEdits = modify(content, ['profiles', profileIndex, 'outputFile'], newOutputFile, {
         formattingOptions: { insertSpaces: true, tabSize: 2 },
@@ -392,7 +401,7 @@ export class ConfigManager implements vscode.Disposable {
       typeof o.showTokenCount === 'boolean' &&
       typeof o.showFileTree === 'boolean' &&
       typeof o.preamble === 'string' &&
-      (o.outputFormat === 'markdown' || o.outputFormat === 'xml')
+      SUPPORTED_FORMATS.includes(o.outputFormat as string)
     );
   }
 }

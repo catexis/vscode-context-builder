@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Profile } from '../types/config';
+import { Profile, OutputFormat } from '../types/config';
 import { BuildStats } from '../types/state';
 import { TokenCounter } from './TokenCounter';
 import { LANGUAGE_MAP } from '../utils/languageMap';
@@ -8,11 +8,138 @@ import { Logger } from '../utils/Logger';
 
 type TreeNode = { [key: string]: TreeNode };
 
-interface FileData {
+export interface FileData {
   path: string;
   content: string;
   size: number;
   lang: string;
+}
+
+export interface IContextFormatter {
+  format(
+    filesData: FileData[],
+    treePart: string,
+    preamblePart: string,
+    stats: BuildStats,
+    profileName: string,
+    workspaceRoot: string,
+  ): string;
+}
+
+export class MarkdownFormatter implements IContextFormatter {
+  public format(
+    filesData: FileData[],
+    treePart: string,
+    preamblePart: string,
+    stats: BuildStats,
+    profileName: string,
+    _workspaceRoot: string,
+  ): string {
+    const header = [
+      `# Project Context: ${profileName}`,
+      `> Generated: ${stats.timestamp.toISOString()}`,
+      `> Files: ${stats.fileCount}`,
+      `> Total Size: ${(stats.totalSizeBytes / 1024).toFixed(1)} KB`,
+      `> Estimated Tokens: ${stats.tokenCount}`,
+    ].join('\n');
+
+    let body = '';
+    if (preamblePart) {
+      body += `# Preamble\n\n${preamblePart}\n\n`;
+    }
+    if (treePart) {
+      body += '# Project Tree\n\n```\n' + treePart + '```\n\n';
+    }
+    body += '# Processed Files\n\n';
+
+    const fileSections = filesData.map((fd) => {
+      return [
+        `## Path: ${fd.path} (Size: ${(fd.size / 1024).toFixed(1)} KB)`,
+        '',
+        '```' + fd.lang,
+        fd.content,
+        '```',
+      ].join('\n');
+    });
+
+    body += fileSections.join('\n\n');
+
+    return header + '\n\n' + body;
+  }
+}
+
+export class XmlFormatter implements IContextFormatter {
+  public format(
+    filesData: FileData[],
+    treePart: string,
+    preamblePart: string,
+    stats: BuildStats,
+    _profileName: string,
+    workspaceRoot: string,
+  ): string {
+    const parts: string[] = [];
+    parts.push(`<project_context>`);
+    parts.push(`  <metadata>`);
+    parts.push(`    <generated_at>${stats.timestamp.toISOString()}</generated_at>`);
+    parts.push(
+      `    <stats files="${stats.fileCount}" size="${(stats.totalSizeBytes / 1024).toFixed(1)} KB" tokens="${stats.tokenCount}" />`,
+    );
+    parts.push(`  </metadata>`);
+
+    if (preamblePart) {
+      parts.push(`  <instructions>`);
+      parts.push(`    <![CDATA[\n${this.escapeCdata(preamblePart)}\n    ]]>`);
+      parts.push(`  </instructions>`);
+    }
+
+    if (treePart) {
+      parts.push(`  <file_tree>`);
+      parts.push(`    <![CDATA[\n${this.escapeCdata(treePart)}    ]]>`);
+      parts.push(`  </file_tree>`);
+    }
+
+    parts.push(`  <files>`);
+    parts.push(`    <root path="${this.escapeXmlAttr(workspaceRoot)}">`);
+
+    for (const fd of filesData) {
+      parts.push(
+        `      <file path="${this.escapeXmlAttr(fd.path)}" language="${this.escapeXmlAttr(fd.lang)}" size="${(fd.size / 1024).toFixed(1)} KB">`,
+      );
+      parts.push(`        <![CDATA[\n${this.escapeCdata(fd.content)}\n        ]]>`);
+      parts.push(`      </file>`);
+    }
+
+    parts.push(`    </root>`);
+    parts.push(`  </files>`);
+    parts.push(`</project_context>`);
+
+    return parts.join('\n');
+  }
+
+  private escapeCdata(text: string): string {
+    return text.replace(/]]>/g, ']]]]><![CDATA[>');
+  }
+
+  private escapeXmlAttr(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+}
+
+export class FormatterFactory {
+  public static getFormatter(format: OutputFormat): IContextFormatter {
+    switch (format) {
+      case 'xml':
+        return new XmlFormatter();
+      case 'markdown':
+      default:
+        return new MarkdownFormatter();
+    }
+  }
 }
 
 export class ContextBuilder {
@@ -48,12 +175,17 @@ export class ContextBuilder {
       timestamp: startTime,
     };
 
-    const format = this.profile.options.outputFormat || 'markdown';
+    const format: OutputFormat = this.profile.options.outputFormat || 'markdown';
+    const formatter = FormatterFactory.getFormatter(format);
 
-    const tempOutput =
-      format === 'xml'
-        ? this.buildXml(filesData, treePart, preamblePart, tempStats)
-        : this.buildMarkdown(filesData, treePart, preamblePart, tempStats);
+    const tempOutput = formatter.format(
+      filesData,
+      treePart,
+      preamblePart,
+      tempStats,
+      this.profile.name,
+      this.workspaceRoot,
+    );
 
     const finalTokenCount = this.tokenCounter.count(tempOutput);
 
@@ -62,10 +194,14 @@ export class ContextBuilder {
       tokenCount: finalTokenCount,
     };
 
-    const finalOutput =
-      format === 'xml'
-        ? this.buildXml(filesData, treePart, preamblePart, finalStats)
-        : this.buildMarkdown(filesData, treePart, preamblePart, finalStats);
+    const finalOutput = formatter.format(
+      filesData,
+      treePart,
+      preamblePart,
+      finalStats,
+      this.profile.name,
+      this.workspaceRoot,
+    );
 
     const outputPath = path.join(this.workspaceRoot, this.profile.outputFile);
     await fs.writeFile(outputPath, finalOutput, 'utf-8');
@@ -76,81 +212,6 @@ export class ContextBuilder {
   private async ensureOutputDirectory(): Promise<void> {
     const outputDir = path.dirname(path.join(this.workspaceRoot, this.profile.outputFile));
     await fs.mkdir(outputDir, { recursive: true });
-  }
-
-  private buildMarkdown(filesData: FileData[], treePart: string, preamblePart: string, stats: BuildStats): string {
-    const header = [
-      `# Project Context: ${this.profile.name}`,
-      `> Generated: ${stats.timestamp.toISOString()}`,
-      `> Files: ${stats.fileCount}`,
-      `> Total Size: ${(stats.totalSizeBytes / 1024).toFixed(1)} KB`,
-      `> Estimated Tokens: ${stats.tokenCount}`,
-    ].join('\n');
-
-    let body = '';
-    if (preamblePart) {
-      body += `# Preamble\n\n${preamblePart}\n\n`;
-    }
-    if (treePart) {
-      body += '# Project Tree\n\n```\n' + treePart + '```\n\n';
-    }
-    body += '# Processed Files\n\n';
-
-    const fileSections = filesData.map((fd) => {
-      return [
-        `## Path: ${fd.path} (Size: ${(fd.size / 1024).toFixed(1)} KB)`,
-        '',
-        '```' + fd.lang,
-        fd.content,
-        '```',
-      ].join('\n');
-    });
-
-    body += fileSections.join('\n\n');
-
-    return header + '\n\n' + body;
-  }
-
-  private buildXml(filesData: FileData[], treePart: string, preamblePart: string, stats: BuildStats): string {
-    const parts: string[] = [];
-    parts.push(`<project_context>`);
-    parts.push(`  <metadata>`);
-    parts.push(`    <generated_at>${stats.timestamp.toISOString()}</generated_at>`);
-    parts.push(
-      `    <stats files="${stats.fileCount}" size="${(stats.totalSizeBytes / 1024).toFixed(1)} KB" tokens="${stats.tokenCount}" />`,
-    );
-    parts.push(`  </metadata>`);
-
-    if (preamblePart) {
-      parts.push(`  <instructions>`);
-      parts.push(`    <![CDATA[\n${this.escapeCdata(preamblePart)}\n    ]]>`);
-      parts.push(`  </instructions>`);
-    }
-
-    if (treePart) {
-      parts.push(`  <file_tree>`);
-      parts.push(`    <![CDATA[\n${this.escapeCdata(treePart)}    ]]>`);
-      parts.push(`  </file_tree>`);
-    }
-
-    parts.push(`  <files>`);
-    parts.push(`    <root path="${this.workspaceRoot}">`);
-
-    for (const fd of filesData) {
-      parts.push(`      <file path="${fd.path}" language="${fd.lang}" size="${(fd.size / 1024).toFixed(1)} KB">`);
-      parts.push(`        <![CDATA[\n${this.escapeCdata(fd.content)}\n        ]]>`);
-      parts.push(`      </file>`);
-    }
-
-    parts.push(`    </root>`);
-    parts.push(`  </files>`);
-    parts.push(`</project_context>`);
-
-    return parts.join('\n');
-  }
-
-  private escapeCdata(text: string): string {
-    return text.replace(/]]>/g, ']]]]><![CDATA[>');
   }
 
   private generateTree(files: string[]): string {
