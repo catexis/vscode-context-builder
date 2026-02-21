@@ -1,4 +1,9 @@
-export type OutputFormat = 'markdown' | 'xml';
+export const FORMAT_EXTENSION_MAP = {
+  markdown: '.md',
+  xml: '.xml',
+} as const;
+
+export type OutputFormat = keyof typeof FORMAT_EXTENSION_MAP;
 
 export interface GlobalSettings {
   debounceMs: number;
