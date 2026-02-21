@@ -48,15 +48,25 @@ export class ConfigManager implements vscode.Disposable {
   public async load(): Promise<ContextConfig> {
     const configPath = this.getConfigPath();
     try {
-      const content = await fs.readFile(configPath, 'utf-8');
+      let content = await fs.readFile(configPath, 'utf-8');
       const parsedFileConfig = JSON.parse(content);
+      let needsMigration = false;
 
       if (Array.isArray(parsedFileConfig.profiles)) {
-        parsedFileConfig.profiles.forEach((p: any) => {
+        parsedFileConfig.profiles.forEach((p: any, index: number) => {
           if (p.options && !p.options.outputFormat) {
             p.options.outputFormat = 'markdown';
+            const edits = modify(content, ['profiles', index, 'options', 'outputFormat'], 'markdown', {
+              formattingOptions: { insertSpaces: true, tabSize: 2 },
+            });
+            content = applyEdits(content, edits);
+            needsMigration = true;
           }
         });
+      }
+
+      if (needsMigration) {
+        await fs.writeFile(configPath, content, 'utf-8');
       }
 
       if (!this.validateFileConfig(parsedFileConfig)) {
@@ -325,24 +335,27 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" not found.`);
     }
 
-    const currentFormat: OutputFormat = config.profiles[profileIndex].options.outputFormat || 'markdown';
-
     const edits = modify(content, ['profiles', profileIndex, 'options', 'outputFormat'], format, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     });
 
     content = applyEdits(content, edits);
 
-    const oldExt = FORMAT_EXTENSION_MAP[currentFormat];
     const newExt = FORMAT_EXTENSION_MAP[format];
     const currentOutputFile = config.profiles[profileIndex].outputFile;
 
-    if (oldExt && newExt && currentOutputFile.endsWith(oldExt)) {
-      const newOutputFile = currentOutputFile.slice(0, -oldExt.length) + newExt;
-      const fileEdits = modify(content, ['profiles', profileIndex, 'outputFile'], newOutputFile, {
-        formattingOptions: { insertSpaces: true, tabSize: 2 },
-      });
-      content = applyEdits(content, fileEdits);
+    if (newExt && currentOutputFile) {
+      const parsedPath = path.parse(currentOutputFile);
+      parsedPath.base = parsedPath.name + newExt;
+      parsedPath.ext = newExt;
+      const newOutputFile = path.format(parsedPath);
+
+      if (newOutputFile !== currentOutputFile) {
+        const fileEdits = modify(content, ['profiles', profileIndex, 'outputFile'], newOutputFile, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        });
+        content = applyEdits(content, fileEdits);
+      }
     }
 
     await fs.writeFile(configPath, content, 'utf-8');

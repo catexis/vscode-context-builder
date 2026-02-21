@@ -117,11 +117,12 @@ export class XmlFormatter implements IContextFormatter {
   }
 
   private escapeCdata(text: string): string {
-    return text.replace(/]]>/g, ']]]]><![CDATA[>');
+    return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').replace(/]]>/g, ']]]]><![CDATA[>');
   }
 
   private escapeXmlAttr(text: string): string {
     return text
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -167,41 +168,42 @@ export class ContextBuilder {
 
     const treePart = this.profile.options.showFileTree ? this.generateTree(this.files) : '';
     const preamblePart = this.profile.options.preamble || '';
-
-    const tempStats: BuildStats = {
-      fileCount: filesData.length,
-      totalSizeBytes,
-      tokenCount: 0,
-      timestamp: startTime,
-    };
-
     const format: OutputFormat = this.profile.options.outputFormat || 'markdown';
     const formatter = FormatterFactory.getFormatter(format);
 
-    const tempOutput = formatter.format(
-      filesData,
-      treePart,
-      preamblePart,
-      tempStats,
-      this.profile.name,
-      this.workspaceRoot,
-    );
+    let estimatedTokens = 0;
+    let finalOutput = '';
 
-    const finalTokenCount = this.tokenCounter.count(tempOutput);
+    for (let i = 0; i < 3; i++) {
+      const tempStats: BuildStats = {
+        fileCount: filesData.length,
+        totalSizeBytes,
+        tokenCount: estimatedTokens,
+        timestamp: startTime,
+      };
+
+      finalOutput = formatter.format(
+        filesData,
+        treePart,
+        preamblePart,
+        tempStats,
+        this.profile.name,
+        this.workspaceRoot,
+      );
+
+      const calculatedTokens = this.tokenCounter.count(finalOutput);
+      if (calculatedTokens === estimatedTokens) {
+        break;
+      }
+      estimatedTokens = calculatedTokens;
+    }
 
     const finalStats: BuildStats = {
-      ...tempStats,
-      tokenCount: finalTokenCount,
+      fileCount: filesData.length,
+      totalSizeBytes,
+      tokenCount: estimatedTokens,
+      timestamp: startTime,
     };
-
-    const finalOutput = formatter.format(
-      filesData,
-      treePart,
-      preamblePart,
-      finalStats,
-      this.profile.name,
-      this.workspaceRoot,
-    );
 
     const outputPath = path.join(this.workspaceRoot, this.profile.outputFile);
     await fs.writeFile(outputPath, finalOutput, 'utf-8');
