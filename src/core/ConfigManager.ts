@@ -48,15 +48,25 @@ export class ConfigManager implements vscode.Disposable {
   public async load(): Promise<ContextConfig> {
     const configPath = this.getConfigPath();
     try {
-      const content = await fs.readFile(configPath, 'utf-8');
+      let content = await fs.readFile(configPath, 'utf-8');
       const parsedFileConfig = JSON.parse(content);
+      let needsMigration = false;
 
       if (Array.isArray(parsedFileConfig.profiles)) {
-        parsedFileConfig.profiles.forEach((p: any) => {
+        parsedFileConfig.profiles.forEach((p: any, index: number) => {
           if (p.options && !p.options.outputFormat) {
             p.options.outputFormat = 'markdown';
+            const edits = modify(content, ['profiles', index, 'options', 'outputFormat'], 'markdown', {
+              formattingOptions: { insertSpaces: true, tabSize: 2 },
+            });
+            content = applyEdits(content, edits);
+            needsMigration = true;
           }
         });
+      }
+
+      if (needsMigration) {
+        await fs.writeFile(configPath, content, 'utf-8');
       }
 
       if (!this.validateFileConfig(parsedFileConfig)) {
@@ -102,6 +112,8 @@ export class ConfigManager implements vscode.Disposable {
   }
 
   public async createDefault(): Promise<void> {
+    const defaultFormat: OutputFormat = 'markdown';
+    const ext = FORMAT_EXTENSION_MAP[defaultFormat];
     const defaultConfig: FileConfig = {
       globalSettings: {
         debounceMs: DEFAULT_DEBOUNCE_MS,
@@ -113,7 +125,7 @@ export class ConfigManager implements vscode.Disposable {
         {
           name: 'default',
           description: 'Default context profile',
-          outputFile: `.context/context.md`,
+          outputFile: `.context/context${ext}`,
           include: ['src/**/*.{ts,js,py,md}', 'package.json', 'README.md'],
           exclude: ['**/*.test.ts'],
           forceInclude: [],
@@ -123,7 +135,7 @@ export class ConfigManager implements vscode.Disposable {
             showTokenCount: true,
             showFileTree: true,
             preamble: 'Project context for LLM.',
-            outputFormat: 'markdown',
+            outputFormat: defaultFormat,
           },
         },
       ],
@@ -241,10 +253,13 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" already exists.`);
     }
 
+    const defaultFormat: OutputFormat = 'markdown';
+    const ext = FORMAT_EXTENSION_MAP[defaultFormat];
+
     const newProfile: Profile = {
       name: profileName,
       description: 'New configuration profile',
-      outputFile: `.context/${profileName}.md`,
+      outputFile: `.context/${profileName}${ext}`,
       include: ['src/**/*.{ts,js,json}', 'README.md'],
       exclude: ['**/*.test.ts', 'dist/**'],
       forceInclude: [],
@@ -254,7 +269,7 @@ export class ConfigManager implements vscode.Disposable {
         showTokenCount: true,
         showFileTree: true,
         preamble: '',
-        outputFormat: 'markdown',
+        outputFormat: defaultFormat,
       },
     };
 
@@ -330,6 +345,23 @@ export class ConfigManager implements vscode.Disposable {
     });
 
     content = applyEdits(content, edits);
+
+    const newExt = FORMAT_EXTENSION_MAP[format];
+    const currentOutputFile = config.profiles[profileIndex].outputFile;
+
+    if (newExt && currentOutputFile) {
+      const parsedPath = path.parse(currentOutputFile);
+      parsedPath.base = parsedPath.name + newExt;
+      parsedPath.ext = newExt;
+      const newOutputFile = path.format(parsedPath);
+
+      if (newOutputFile !== currentOutputFile) {
+        const fileEdits = modify(content, ['profiles', profileIndex, 'outputFile'], newOutputFile, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        });
+        content = applyEdits(content, fileEdits);
+      }
+    }
 
     await fs.writeFile(configPath, content, 'utf-8');
     Logger.info(`Profile "${profileName}" format updated to "${format}".`);

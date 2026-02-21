@@ -16,33 +16,23 @@ export interface FileData {
 }
 
 export interface IContextFormatter {
-  format(
-    filesData: FileData[],
-    treePart: string,
-    preamblePart: string,
-    stats: BuildStats,
-    profileName: string,
-    workspaceRoot: string,
-  ): string;
+  formatHeader(stats: BuildStats, profileName: string): string;
+  formatBody(filesData: FileData[], treePart: string, preamblePart: string, workspaceRoot: string): string;
+  assemble(header: string, body: string): string;
 }
 
 export class MarkdownFormatter implements IContextFormatter {
-  public format(
-    filesData: FileData[],
-    treePart: string,
-    preamblePart: string,
-    stats: BuildStats,
-    profileName: string,
-    _workspaceRoot: string,
-  ): string {
-    const header = [
+  public formatHeader(stats: BuildStats, profileName: string): string {
+    return [
       `# Project Context: ${profileName}`,
       `> Generated: ${stats.timestamp.toISOString()}`,
       `> Files: ${stats.fileCount}`,
       `> Total Size: ${(stats.totalSizeBytes / 1024).toFixed(1)} KB`,
       `> Estimated Tokens: ${stats.tokenCount}`,
     ].join('\n');
+  }
 
+  public formatBody(filesData: FileData[], treePart: string, preamblePart: string, _workspaceRoot: string): string {
     let body = '';
     if (preamblePart) {
       body += `# Preamble\n\n${preamblePart}\n\n`;
@@ -63,28 +53,28 @@ export class MarkdownFormatter implements IContextFormatter {
     });
 
     body += fileSections.join('\n\n');
+    return body;
+  }
 
+  public assemble(header: string, body: string): string {
     return header + '\n\n' + body;
   }
 }
 
 export class XmlFormatter implements IContextFormatter {
-  public format(
-    filesData: FileData[],
-    treePart: string,
-    preamblePart: string,
-    stats: BuildStats,
-    _profileName: string,
-    workspaceRoot: string,
-  ): string {
+  public formatHeader(stats: BuildStats, _profileName: string): string {
     const parts: string[] = [];
-    parts.push(`<project_context>`);
     parts.push(`  <metadata>`);
     parts.push(`    <generated_at>${stats.timestamp.toISOString()}</generated_at>`);
     parts.push(
       `    <stats files="${stats.fileCount}" size="${(stats.totalSizeBytes / 1024).toFixed(1)} KB" tokens="${stats.tokenCount}" />`,
     );
     parts.push(`  </metadata>`);
+    return parts.join('\n');
+  }
+
+  public formatBody(filesData: FileData[], treePart: string, preamblePart: string, workspaceRoot: string): string {
+    const parts: string[] = [];
 
     if (preamblePart) {
       parts.push(`  <instructions>`);
@@ -98,22 +88,22 @@ export class XmlFormatter implements IContextFormatter {
       parts.push(`  </file_tree>`);
     }
 
-    parts.push(`  <files>`);
-    parts.push(`    <root path="${this.escapeXmlAttr(workspaceRoot)}">`);
+    parts.push(`  <files workspace="${this.escapeXmlAttr(workspaceRoot)}">`);
 
     for (const fd of filesData) {
       parts.push(
-        `      <file path="${this.escapeXmlAttr(fd.path)}" language="${this.escapeXmlAttr(fd.lang)}" size="${(fd.size / 1024).toFixed(1)} KB">`,
+        `    <file path="${this.escapeXmlAttr(fd.path)}" language="${this.escapeXmlAttr(fd.lang)}" size="${(fd.size / 1024).toFixed(1)} KB">`,
       );
-      parts.push(`        <![CDATA[\n${this.escapeCdata(fd.content)}\n        ]]>`);
-      parts.push(`      </file>`);
+      parts.push(`      <![CDATA[\n${this.escapeCdata(fd.content)}\n      ]]>`);
+      parts.push(`    </file>`);
     }
 
-    parts.push(`    </root>`);
     parts.push(`  </files>`);
-    parts.push(`</project_context>`);
-
     return parts.join('\n');
+  }
+
+  public assemble(header: string, body: string): string {
+    return `<project_context>\n${header}\n${body}\n</project_context>`;
   }
 
   private escapeCdata(text: string): string {
@@ -171,7 +161,8 @@ export class ContextBuilder {
     const format: OutputFormat = this.profile.options.outputFormat || 'markdown';
     const formatter = FormatterFactory.getFormatter(format);
 
-    let estimatedTokens = 0;
+    const body = formatter.formatBody(filesData, treePart, preamblePart, this.workspaceRoot);
+    let estimatedTokens = this.tokenCounter.count(body);
     let finalOutput = '';
 
     for (let i = 0; i < 3; i++) {
@@ -182,14 +173,8 @@ export class ContextBuilder {
         timestamp: startTime,
       };
 
-      finalOutput = formatter.format(
-        filesData,
-        treePart,
-        preamblePart,
-        tempStats,
-        this.profile.name,
-        this.workspaceRoot,
-      );
+      const header = formatter.formatHeader(tempStats, this.profile.name);
+      finalOutput = formatter.assemble(header, body);
 
       const calculatedTokens = this.tokenCounter.count(finalOutput);
       if (calculatedTokens === estimatedTokens) {
