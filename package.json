@@ -10,8 +10,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:context-builder.initConfig",
-    "onCommand:context-builder.selectFormat",
     "workspaceContains:.vscode/context-config.json"
   ],
   "main": "./dist/extension.js",
