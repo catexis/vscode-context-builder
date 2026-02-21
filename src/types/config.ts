@@ -1,3 +1,5 @@
+export type OutputFormat = 'markdown' | 'xml';
+
 export interface GlobalSettings {
   debounceMs: number;
   maxFileSizeKB: number;
@@ -11,6 +13,7 @@ export interface ProfileOptions {
   showTokenCount: boolean;
   showFileTree: boolean;
   preamble: string;
+  outputFormat: OutputFormat;
 }
 
 export interface Profile {
