@@ -89,16 +89,18 @@ export class XmlFormatter implements IContextFormatter {
       parts.push(`  </file_tree>`);
     }
 
-    parts.push(`  <files workspace="${this.escapeXmlAttr(workspaceRoot)}">`);
+    parts.push(`  <files>`);
+    parts.push(`    <root path="${this.escapeXmlAttr(workspaceRoot)}">`);
 
     for (const fd of filesData) {
       parts.push(
-        `    <file path="${this.escapeXmlAttr(fd.path)}" language="${this.escapeXmlAttr(fd.lang)}" size="${(fd.size / 1024).toFixed(1)} KB">`,
+        `      <file path="${this.escapeXmlAttr(fd.path)}" language="${this.escapeXmlAttr(fd.lang)}" size="${(fd.size / 1024).toFixed(1)} KB">`,
       );
-      parts.push(`      <![CDATA[\n${this.escapeCdata(fd.content)}\n      ]]>`);
-      parts.push(`    </file>`);
+      parts.push(`        <![CDATA[\n${this.escapeCdata(fd.content)}\n        ]]>`);
+      parts.push(`      </file>`);
     }
 
+    parts.push(`    </root>`);
     parts.push(`  </files>`);
     return parts.join('\n');
   }

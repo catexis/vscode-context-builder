@@ -344,6 +344,11 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" not found.`);
     }
 
+    const currentFormat = config.profiles[profileIndex].options.outputFormat;
+    if (currentFormat === format) {
+      return;
+    }
+
     const oldOutputFile = config.profiles[profileIndex].outputFile;
 
     const edits = modify(content, ['profiles', profileIndex, 'options', 'outputFormat'], format, {

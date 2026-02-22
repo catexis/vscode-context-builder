@@ -209,6 +209,9 @@ export function registerCommands(
         });
 
         if (selected) {
+          if (selected.formatValue === currentFormat) {
+            return;
+          }
           await configManager.updateProfileFormat(profileName, selected.formatValue);
           vscode.window.showInformationMessage(
             `Output format changed to ${selected.formatValue} for profile "${profileName}".`,
