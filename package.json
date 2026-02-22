@@ -4,12 +4,23 @@
   "description": "Automated project context builder for LLMs",
   "version": "0.0.1",
   "repository": "github:catexis/vscode-context-builder",
+  "icon": "assets/icon.png",
+  "publisher": "catexis",
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "ai",
+    "context",
+    "prompt",
+    "markdown",
+    "xml"
+  ],
   "engines": {
     "vscode": "^1.108.1"
   },
-  "categories": [
-    "Other"
-  ],
   "activationEvents": [
     "workspaceContains:.vscode/context-config.json"
   ],
