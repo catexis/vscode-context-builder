@@ -1,0 +1,41 @@
+name: PR Validation
+run-name: PR validation for branch "${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}"
+
+on:
+  pull_request:
+    branches: master
+  push:
+    branches: master
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    name: Checks
+    steps:
+      - name: Get latest SHA on the branch
+        id: get_sha
+        run: |
+          echo "COMMIT_SHA=${{ github.event.pull_request.head.sha || github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.get_sha.outputs.COMMIT_SHA }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ vars.NODE_VERSION || '24' }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run linter
+        run: npm run lint -- --max-warnings 0
+
+      - name: Run type checks
+        run: npm run check-types
+
+      - name: Run build check
+        run: npx vsce package --no-dependencies
