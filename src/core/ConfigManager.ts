@@ -2,7 +2,15 @@ import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { modify, applyEdits } from 'jsonc-parser';
-import { ContextConfig, FileConfig, Profile, ProfileOptions, OutputFormat } from '../types/config';
+import {
+  ContextConfig,
+  FileConfig,
+  Profile,
+  ProfileOptions,
+  OutputFormat,
+  FORMAT_EXTENSION_MAP,
+  SUPPORTED_FORMATS,
+} from '../types/config';
 import {
   CONFIG_PATH,
   DEFAULT_DEBOUNCE_MS,
@@ -12,13 +20,6 @@ import {
   KEY_WATCHER_ENABLED,
 } from '../utils/constants';
 import { Logger } from '../utils/Logger';
-
-export const FORMAT_EXTENSION_MAP: Record<OutputFormat, string> = {
-  markdown: '.md',
-  xml: '.xml',
-};
-
-const SUPPORTED_FORMATS = Object.keys(FORMAT_EXTENSION_MAP);
 
 export class ConfigManager implements vscode.Disposable {
   private configWatcher: vscode.FileSystemWatcher | null = null;
@@ -52,6 +53,9 @@ export class ConfigManager implements vscode.Disposable {
       const parsedFileConfig = JSON.parse(content);
       let needsMigration = false;
 
+      // IMPORTANT: `content` is mutated each iteration. `modify()` computes edit
+      // positions against the current `content` value, so sequential application is safe
+      // as long as `content` is updated before the next `modify()` call.
       if (Array.isArray(parsedFileConfig.profiles)) {
         parsedFileConfig.profiles.forEach((p: any, index: number) => {
           if (p.options && !p.options.outputFormat) {
@@ -340,6 +344,8 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" not found.`);
     }
 
+    const oldOutputFile = config.profiles[profileIndex].outputFile;
+
     const edits = modify(content, ['profiles', profileIndex, 'options', 'outputFormat'], format, {
       formattingOptions: { insertSpaces: true, tabSize: 2 },
     });
@@ -364,6 +370,17 @@ export class ConfigManager implements vscode.Disposable {
     }
 
     await fs.writeFile(configPath, content, 'utf-8');
+
+    if (oldOutputFile) {
+      const oldAbsPath = path.join(this.workspaceRoot, oldOutputFile);
+      try {
+        await fs.unlink(oldAbsPath);
+        Logger.info(`Removed old output file: ${oldAbsPath}`);
+      } catch {
+        // Ignored if file does not exist
+      }
+    }
+
     Logger.info(`Profile "${profileName}" format updated to "${format}".`);
   }
 

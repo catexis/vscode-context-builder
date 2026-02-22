@@ -5,6 +5,13 @@ export const FORMAT_EXTENSION_MAP = {
 
 export type OutputFormat = keyof typeof FORMAT_EXTENSION_MAP;
 
+export const SUPPORTED_FORMATS: readonly string[] = Object.keys(FORMAT_EXTENSION_MAP);
+
+export const FORMAT_DESCRIPTIONS: Record<OutputFormat, string> = {
+  markdown: 'Standard Markdown output',
+  xml: 'Structured XML output',
+};
+
 export interface GlobalSettings {
   debounceMs: number;
   maxFileSizeKB: number;

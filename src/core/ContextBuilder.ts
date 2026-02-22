@@ -62,9 +62,10 @@ export class MarkdownFormatter implements IContextFormatter {
 }
 
 export class XmlFormatter implements IContextFormatter {
-  public formatHeader(stats: BuildStats, _profileName: string): string {
+  public formatHeader(stats: BuildStats, profileName: string): string {
     const parts: string[] = [];
     parts.push(`  <metadata>`);
+    parts.push(`    <profile>${this.escapeXmlText(profileName)}</profile>`);
     parts.push(`    <generated_at>${stats.timestamp.toISOString()}</generated_at>`);
     parts.push(
       `    <stats files="${stats.fileCount}" size="${(stats.totalSizeBytes / 1024).toFixed(1)} KB" tokens="${stats.tokenCount}" />`,
@@ -103,7 +104,11 @@ export class XmlFormatter implements IContextFormatter {
   }
 
   public assemble(header: string, body: string): string {
-    return `<project_context>\n${header}\n${body}\n</project_context>`;
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<project_context>\n${header}\n${body}\n</project_context>`;
+  }
+
+  private escapeXmlText(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   private escapeCdata(text: string): string {
@@ -124,11 +129,12 @@ export class XmlFormatter implements IContextFormatter {
 export class FormatterFactory {
   public static getFormatter(format: OutputFormat): IContextFormatter {
     switch (format) {
+      case 'markdown':
+        return new MarkdownFormatter();
       case 'xml':
         return new XmlFormatter();
-      case 'markdown':
       default:
-        return new MarkdownFormatter();
+        throw new Error(`Unsupported output format: ${format satisfies never}`);
     }
   }
 }
@@ -158,7 +164,11 @@ export class ContextBuilder {
 
     const treePart = this.profile.options.showFileTree ? this.generateTree(this.files) : '';
     const preamblePart = this.profile.options.preamble || '';
-    const format: OutputFormat = this.profile.options.outputFormat || 'markdown';
+
+    const format: OutputFormat = this.profile.options.outputFormat;
+    if (!format) {
+      throw new Error('Profile outputFormat is not defined. Check configuration.');
+    }
     const formatter = FormatterFactory.getFormatter(format);
 
     const body = formatter.formatBody(filesData, treePart, preamblePart, this.workspaceRoot);

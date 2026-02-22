@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { Watcher } from '../core/Watcher';
-import { ConfigManager, FORMAT_EXTENSION_MAP } from '../core/ConfigManager';
+import { ConfigManager } from '../core/ConfigManager';
 import { WatcherState } from '../types/state';
-import { OutputFormat } from '../types/config';
+import { OutputFormat, FORMAT_EXTENSION_MAP, FORMAT_DESCRIPTIONS } from '../types/config';
 import { Logger } from '../utils/Logger';
 
 export function registerCommands(
@@ -31,6 +31,7 @@ export function registerCommands(
         const items = config.profiles.map((p) => ({
           label: p.name,
           description: p.description,
+          detail: `Format: ${p.options.outputFormat || 'markdown'} | Output: ${p.outputFile}`,
         }));
 
         const selected = await vscode.window.showQuickPick(items, {
@@ -191,14 +192,16 @@ export function registerCommands(
           return;
         }
 
-        const formatDescriptions: Record<string, string> = {
-          markdown: 'Standard Markdown output',
-          xml: 'Structured XML output',
-        };
+        const profile = configManager.getProfile(profileName);
+        const currentFormat = profile?.options.outputFormat || 'markdown';
 
-        const items: vscode.QuickPickItem[] = Object.keys(FORMAT_EXTENSION_MAP).map((format) => ({
-          label: format,
-          description: formatDescriptions[format] || `${format} output format`,
+        const items: (vscode.QuickPickItem & { formatValue: OutputFormat })[] = (
+          Object.keys(FORMAT_EXTENSION_MAP) as OutputFormat[]
+        ).map((format) => ({
+          label: format === currentFormat ? `$(check) ${format}` : format,
+          description: FORMAT_DESCRIPTIONS[format],
+          picked: format === currentFormat,
+          formatValue: format,
         }));
 
         const selected = await vscode.window.showQuickPick(items, {
@@ -206,9 +209,9 @@ export function registerCommands(
         });
 
         if (selected) {
-          await configManager.updateProfileFormat(profileName, selected.label as OutputFormat);
+          await configManager.updateProfileFormat(profileName, selected.formatValue);
           vscode.window.showInformationMessage(
-            `Output format changed to ${selected.label} for profile "${profileName}".`,
+            `Output format changed to ${selected.formatValue} for profile "${profileName}".`,
           );
         }
       } catch (error) {
