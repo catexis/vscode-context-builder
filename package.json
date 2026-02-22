@@ -3,6 +3,7 @@
   "displayName": "Context Builder",
   "description": "Automated project context builder for LLMs",
   "version": "0.0.1",
+  "repository": "github:catexis/vscode-context-builder",
   "engines": {
     "vscode": "^1.108.1"
   },
