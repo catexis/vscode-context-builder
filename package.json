@@ -10,7 +10,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:context-builder.initConfig",
     "workspaceContains:.vscode/context-config.json"
   ],
   "main": "./dist/extension.js",
@@ -64,6 +63,11 @@
       {
         "command": "context-builder.removeProfile",
         "title": "Remove Profile",
+        "category": "Context Builder"
+      },
+      {
+        "command": "context-builder.selectFormat",
+        "title": "Select Output Format",
         "category": "Context Builder"
       }
     ]

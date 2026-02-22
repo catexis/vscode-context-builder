@@ -2,7 +2,15 @@ import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { modify, applyEdits } from 'jsonc-parser';
-import { ContextConfig, FileConfig, Profile, ProfileOptions } from '../types/config';
+import {
+  ContextConfig,
+  FileConfig,
+  Profile,
+  ProfileOptions,
+  OutputFormat,
+  FORMAT_EXTENSION_MAP,
+  SUPPORTED_FORMATS,
+} from '../types/config';
 import {
   CONFIG_PATH,
   DEFAULT_DEBOUNCE_MS,
@@ -41,18 +49,37 @@ export class ConfigManager implements vscode.Disposable {
   public async load(): Promise<ContextConfig> {
     const configPath = this.getConfigPath();
     try {
-      const content = await fs.readFile(configPath, 'utf-8');
+      let content = await fs.readFile(configPath, 'utf-8');
       const parsedFileConfig = JSON.parse(content);
+      let needsMigration = false;
+
+      // IMPORTANT: `content` is mutated each iteration. `modify()` computes edit
+      // positions against the current `content` value, so sequential application is safe
+      // as long as `content` is updated before the next `modify()` call.
+      if (Array.isArray(parsedFileConfig.profiles)) {
+        parsedFileConfig.profiles.forEach((p: any, index: number) => {
+          if (p.options && !p.options.outputFormat) {
+            p.options.outputFormat = 'markdown';
+            const edits = modify(content, ['profiles', index, 'options', 'outputFormat'], 'markdown', {
+              formattingOptions: { insertSpaces: true, tabSize: 2 },
+            });
+            content = applyEdits(content, edits);
+            needsMigration = true;
+          }
+        });
+      }
+
+      if (needsMigration) {
+        await fs.writeFile(configPath, content, 'utf-8');
+      }
 
       if (!this.validateFileConfig(parsedFileConfig)) {
         throw new Error('Invalid configuration structure');
       }
 
-      // Merge file config with Memento state
       const activeProfileName = this.memento.get<string>(KEY_ACTIVE_PROFILE);
       const watcherEnabled = this.memento.get<boolean>(KEY_WATCHER_ENABLED, false);
 
-      // Resolve active profile
       let finalActiveProfile = activeProfileName;
       if (!finalActiveProfile || !parsedFileConfig.profiles.find((p: Profile) => p.name === finalActiveProfile)) {
         if (parsedFileConfig.profiles.length > 0) {
@@ -60,7 +87,6 @@ export class ConfigManager implements vscode.Disposable {
         } else {
           finalActiveProfile = '';
         }
-        // Update memento if we fell back to default
         if (finalActiveProfile) {
           await this.memento.update(KEY_ACTIVE_PROFILE, finalActiveProfile);
         }
@@ -90,7 +116,8 @@ export class ConfigManager implements vscode.Disposable {
   }
 
   public async createDefault(): Promise<void> {
-    // We only write FileConfig to disk
+    const defaultFormat: OutputFormat = 'markdown';
+    const ext = FORMAT_EXTENSION_MAP[defaultFormat];
     const defaultConfig: FileConfig = {
       globalSettings: {
         debounceMs: DEFAULT_DEBOUNCE_MS,
@@ -102,7 +129,7 @@ export class ConfigManager implements vscode.Disposable {
         {
           name: 'default',
           description: 'Default context profile',
-          outputFile: `.context/context.md`,
+          outputFile: `.context/context${ext}`,
           include: ['src/**/*.{ts,js,py,md}', 'package.json', 'README.md'],
           exclude: ['**/*.test.ts'],
           forceInclude: [],
@@ -112,6 +139,7 @@ export class ConfigManager implements vscode.Disposable {
             showTokenCount: true,
             showFileTree: true,
             preamble: 'Project context for LLM.',
+            outputFormat: defaultFormat,
           },
         },
       ],
@@ -123,7 +151,6 @@ export class ConfigManager implements vscode.Disposable {
     await fs.mkdir(configDir, { recursive: true });
     await fs.writeFile(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
 
-    // Reset state
     await this.memento.update(KEY_ACTIVE_PROFILE, 'default');
     await this.memento.update(KEY_WATCHER_ENABLED, false);
   }
@@ -147,11 +174,9 @@ export class ConfigManager implements vscode.Disposable {
       } catch (error) {
         this._onConfigChanged.fire(null);
 
-        // Handle missing file gracefully (User might have just switched workspace)
         const err = error as { code?: string; message: string };
         if (err.code === 'ENOENT') {
           Logger.info('Config file not found. Waiting for creation...');
-          // Do not show error message to user, just log it
           return;
         }
 
@@ -178,7 +203,6 @@ export class ConfigManager implements vscode.Disposable {
       this._onConfigChanged.fire(null);
     });
 
-    // Initial load attempt
     reload();
   }
 
@@ -194,22 +218,17 @@ export class ConfigManager implements vscode.Disposable {
   public async updateActiveProfile(profileName: string): Promise<void> {
     if (this.currentConfig && this.currentConfig.activeProfile === profileName) return;
 
-    // Update Memento
     await this.memento.update(KEY_ACTIVE_PROFILE, profileName);
     Logger.info(`Updated activeProfile to "${profileName}" in Memento.`);
 
-    // Refresh internal state and notify listeners
     if (this.currentConfig) {
       this.currentConfig.activeProfile = profileName;
       this._onConfigChanged.fire(this.currentConfig);
     } else {
-      // If config wasn't loaded, try loading it now
       try {
         const config = await this.load();
         this._onConfigChanged.fire(config);
-      } catch (e) {
-        // Ignore load error here
-      }
+      } catch (e) {}
     }
   }
 
@@ -238,10 +257,13 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" already exists.`);
     }
 
+    const defaultFormat: OutputFormat = 'markdown';
+    const ext = FORMAT_EXTENSION_MAP[defaultFormat];
+
     const newProfile: Profile = {
       name: profileName,
       description: 'New configuration profile',
-      outputFile: `.context/${profileName}.md`,
+      outputFile: `.context/${profileName}${ext}`,
       include: ['src/**/*.{ts,js,json}', 'README.md'],
       exclude: ['**/*.test.ts', 'dist/**'],
       forceInclude: [],
@@ -251,6 +273,7 @@ export class ConfigManager implements vscode.Disposable {
         showTokenCount: true,
         showFileTree: true,
         preamble: '',
+        outputFormat: defaultFormat,
       },
     };
 
@@ -270,8 +293,6 @@ export class ConfigManager implements vscode.Disposable {
     const configPath = this.getConfigPath();
     let content = await fs.readFile(configPath, 'utf-8');
 
-    // Load current config to determine index and remaining profiles
-    // We explicitly reload to ensure we are working with the latest state on disk
     const config = await this.load();
 
     if (config.profiles.length <= 1) {
@@ -283,7 +304,6 @@ export class ConfigManager implements vscode.Disposable {
       throw new Error(`Profile "${profileName}" not found.`);
     }
 
-    // 1. Remove profile from array
     const removeEdits = modify(content, ['profiles', profileIndex], undefined, {
       formattingOptions: {
         insertSpaces: true,
@@ -293,10 +313,8 @@ export class ConfigManager implements vscode.Disposable {
 
     content = applyEdits(content, removeEdits);
 
-    // 2. Handle Active Profile Switch if needed
     if (config.activeProfile === profileName) {
       const remainingProfiles = config.profiles.filter((p) => p.name !== profileName);
-      // Fallback to the first available profile
       const newActiveProfile = remainingProfiles[0].name;
 
       const updateActiveEdits = modify(content, ['activeProfile'], newActiveProfile, {
@@ -308,7 +326,6 @@ export class ConfigManager implements vscode.Disposable {
 
       content = applyEdits(content, updateActiveEdits);
 
-      // Update Memento immediately to keep sync
       await this.memento.update(KEY_ACTIVE_PROFILE, newActiveProfile);
       Logger.info(`Active profile automatically switched to "${newActiveProfile}" after deletion.`);
     }
@@ -317,13 +334,66 @@ export class ConfigManager implements vscode.Disposable {
     Logger.info(`Profile "${profileName}" removed from config.`);
   }
 
+  public async updateProfileFormat(profileName: string, format: OutputFormat): Promise<void> {
+    const configPath = this.getConfigPath();
+    let content = await fs.readFile(configPath, 'utf-8');
+    const config = await this.load();
+
+    const profileIndex = config.profiles.findIndex((p) => p.name === profileName);
+    if (profileIndex === -1) {
+      throw new Error(`Profile "${profileName}" not found.`);
+    }
+
+    const currentFormat = config.profiles[profileIndex].options.outputFormat;
+    if (currentFormat === format) {
+      return;
+    }
+
+    const oldOutputFile = config.profiles[profileIndex].outputFile;
+
+    const edits = modify(content, ['profiles', profileIndex, 'options', 'outputFormat'], format, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 },
+    });
+
+    content = applyEdits(content, edits);
+
+    const newExt = FORMAT_EXTENSION_MAP[format];
+    const currentOutputFile = config.profiles[profileIndex].outputFile;
+
+    if (newExt && currentOutputFile) {
+      const parsedPath = path.parse(currentOutputFile);
+      parsedPath.base = parsedPath.name + newExt;
+      parsedPath.ext = newExt;
+      const newOutputFile = path.format(parsedPath);
+
+      if (newOutputFile !== currentOutputFile) {
+        const fileEdits = modify(content, ['profiles', profileIndex, 'outputFile'], newOutputFile, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        });
+        content = applyEdits(content, fileEdits);
+      }
+    }
+
+    await fs.writeFile(configPath, content, 'utf-8');
+
+    if (oldOutputFile) {
+      const oldAbsPath = path.join(this.workspaceRoot, oldOutputFile);
+      try {
+        await fs.unlink(oldAbsPath);
+        Logger.info(`Removed old output file: ${oldAbsPath}`);
+      } catch {
+        // Ignored if file does not exist
+      }
+    }
+
+    Logger.info(`Profile "${profileName}" format updated to "${format}".`);
+  }
+
   private validateFileConfig(config: unknown): config is FileConfig {
     if (!config || typeof config !== 'object') return false;
 
-    // Safe cast to access properties for check
     const c = config as Record<string, unknown>;
 
-    // Validate globalSettings
     if (!c.globalSettings || typeof c.globalSettings !== 'object') return false;
     const gs = c.globalSettings as Record<string, unknown>;
 
@@ -336,7 +406,6 @@ export class ConfigManager implements vscode.Disposable {
       return false;
     }
 
-    // Validate profiles array
     if (!Array.isArray(c.profiles)) return false;
 
     for (const profile of c.profiles) {
@@ -371,7 +440,8 @@ export class ConfigManager implements vscode.Disposable {
       typeof o.removeComments === 'boolean' &&
       typeof o.showTokenCount === 'boolean' &&
       typeof o.showFileTree === 'boolean' &&
-      typeof o.preamble === 'string'
+      typeof o.preamble === 'string' &&
+      SUPPORTED_FORMATS.includes(o.outputFormat as string)
     );
   }
 }

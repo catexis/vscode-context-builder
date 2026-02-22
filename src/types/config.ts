@@ -1,3 +1,17 @@
+export const FORMAT_EXTENSION_MAP = {
+  markdown: '.md',
+  xml: '.xml',
+} as const;
+
+export type OutputFormat = keyof typeof FORMAT_EXTENSION_MAP;
+
+export const SUPPORTED_FORMATS: readonly string[] = Object.keys(FORMAT_EXTENSION_MAP);
+
+export const FORMAT_DESCRIPTIONS: Record<OutputFormat, string> = {
+  markdown: 'Standard Markdown output',
+  xml: 'Structured XML output',
+};
+
 export interface GlobalSettings {
   debounceMs: number;
   maxFileSizeKB: number;
@@ -11,6 +25,7 @@ export interface ProfileOptions {
   showTokenCount: boolean;
   showFileTree: boolean;
   preamble: string;
+  outputFormat: OutputFormat;
 }
 
 export interface Profile {

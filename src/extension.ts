@@ -99,7 +99,8 @@ export async function activate(context: vscode.ExtensionContext) {
     watcher.onStateChange((state) => {
       const profileName = watcher.currentProfile?.name;
       const stats = watcher.currentStats;
-      statusBar.update(state, profileName, stats?.fileCount);
+      const format = watcher.currentProfile?.options.outputFormat;
+      statusBar.update(state, profileName, stats?.fileCount, format);
       Logger.info(`State changed: ${state}`);
     });
 
@@ -107,7 +108,8 @@ export async function activate(context: vscode.ExtensionContext) {
       Logger.info(`Build finished: ${stats.fileCount} files, ${stats.tokenCount} tokens`);
       if (watcher.state === WatcherState.Watching) {
         const profileName = watcher.currentProfile?.name;
-        statusBar.update(WatcherState.Watching, profileName, stats.fileCount);
+        const format = watcher.currentProfile?.options.outputFormat;
+        statusBar.update(WatcherState.Watching, profileName, stats.fileCount, format);
       }
     });
 

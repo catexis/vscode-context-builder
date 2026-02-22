@@ -15,7 +15,7 @@ export class StatusBar implements vscode.Disposable {
     this.statusBarItem.command = command;
   }
 
-  public update(state: WatcherState, profileName?: string, fileCount?: number): void {
+  public update(state: WatcherState, profileName?: string, fileCount?: number, format?: string): void {
     switch (state) {
       case WatcherState.Idle:
         this.statusBarItem.text = '$(circle-slash) Context: Off';
@@ -24,8 +24,9 @@ export class StatusBar implements vscode.Disposable {
 
       case WatcherState.Watching:
         const countStr = fileCount !== undefined ? `${fileCount} files` : 'Ready';
-        this.statusBarItem.text = `🟢 ${profileName} (${countStr})`;
-        this.statusBarItem.tooltip = `Watching profile: ${profileName}. Click for options.`;
+        const formatStr = format ? ` [${format}]` : '';
+        this.statusBarItem.text = `🟢 ${profileName}${formatStr} (${countStr})`;
+        this.statusBarItem.tooltip = `Watching profile: ${profileName} | Format: ${format || 'markdown'}. Click for options.`;
         break;
 
       case WatcherState.Debouncing:

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { Watcher } from '../core/Watcher';
 import { ConfigManager } from '../core/ConfigManager';
 import { WatcherState } from '../types/state';
+import { OutputFormat, FORMAT_EXTENSION_MAP, FORMAT_DESCRIPTIONS } from '../types/config';
 import { Logger } from '../utils/Logger';
 
 export function registerCommands(
@@ -11,7 +12,6 @@ export function registerCommands(
   configManager: ConfigManager,
   workspaceRoot: string,
 ): void {
-  // 1. Init Configuration
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.initConfig', async () => {
       if (await configManager.exists()) {
@@ -24,7 +24,6 @@ export function registerCommands(
     }),
   );
 
-  // 2. Select Profile
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.selectProfile', async () => {
       try {
@@ -32,6 +31,7 @@ export function registerCommands(
         const items = config.profiles.map((p) => ({
           label: p.name,
           description: p.description,
+          detail: `Format: ${p.options.outputFormat || 'markdown'} | Output: ${p.outputFile}`,
         }));
 
         const selected = await vscode.window.showQuickPick(items, {
@@ -39,7 +39,6 @@ export function registerCommands(
         });
 
         if (selected) {
-          // Update profile only. Watcher state (enabled/disabled) remains unchanged.
           await configManager.updateActiveProfile(selected.label);
         }
       } catch (error) {
@@ -49,7 +48,6 @@ export function registerCommands(
     }),
   );
 
-  // 3. Start Watching
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.startWatching', async () => {
       await configManager.setWatcherEnabled(true);
@@ -57,7 +55,6 @@ export function registerCommands(
     }),
   );
 
-  // 4. Stop Watching
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.stopWatching', async () => {
       await configManager.setWatcherEnabled(false);
@@ -65,14 +62,12 @@ export function registerCommands(
     }),
   );
 
-  // 5. Build Once
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.buildOnce', async () => {
       try {
         const config = await configManager.load();
         const profileName = watcher.currentProfile?.name || config.activeProfile;
 
-        // Ensure profile exists before building
         const profile = configManager.getProfile(profileName);
         if (!profile) {
           vscode.window.showErrorMessage(`Profile "${profileName}" not found.`);
@@ -88,7 +83,6 @@ export function registerCommands(
     }),
   );
 
-  // 6. Copy Output Path
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.copyOutputPath', async () => {
       const profile = watcher.currentProfile || configManager.getActiveProfile();
@@ -104,18 +98,17 @@ export function registerCommands(
     }),
   );
 
-  // 7. Create Profile
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.createProfile', async () => {
       try {
-        await configManager.load(); // Ensure config is loaded
+        await configManager.load();
 
         const nameInput = await vscode.window.showInputBox({
           prompt: 'Enter profile name (leave empty for timestamp)',
           placeHolder: 'e.g., frontend-build',
         });
 
-        if (nameInput === undefined) return; // User cancelled
+        if (nameInput === undefined) return;
 
         let finalName = nameInput.trim();
 
@@ -149,7 +142,6 @@ export function registerCommands(
     }),
   );
 
-  // 8. Remove Profile
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.removeProfile', async () => {
       try {
@@ -189,7 +181,50 @@ export function registerCommands(
     }),
   );
 
-  // 9. Show Menu (Status Bar Interaction)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('context-builder.selectFormat', async () => {
+      try {
+        const config = await configManager.load();
+        const profileName = watcher.currentProfile?.name || config.activeProfile;
+
+        if (!profileName) {
+          vscode.window.showErrorMessage('No active profile found.');
+          return;
+        }
+
+        const profile = configManager.getProfile(profileName);
+        const currentFormat = profile?.options.outputFormat || 'markdown';
+
+        const items: (vscode.QuickPickItem & { formatValue: OutputFormat })[] = (
+          Object.keys(FORMAT_EXTENSION_MAP) as OutputFormat[]
+        ).map((format) => ({
+          label: format === currentFormat ? `$(check) ${format}` : format,
+          description: FORMAT_DESCRIPTIONS[format],
+          picked: format === currentFormat,
+          formatValue: format,
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+          placeHolder: `Select output format for profile "${profileName}"`,
+        });
+
+        if (selected) {
+          if (selected.formatValue === currentFormat) {
+            return;
+          }
+          await configManager.updateProfileFormat(profileName, selected.formatValue);
+          vscode.window.showInformationMessage(
+            `Output format changed to ${selected.formatValue} for profile "${profileName}".`,
+          );
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Failed to change output format: ${msg}`);
+        Logger.error('Select Format failed', error);
+      }
+    }),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand('context-builder.showMenu', async () => {
       const isIdle = watcher.state === WatcherState.Idle;
@@ -201,6 +236,7 @@ export function registerCommands(
           { label: '$(play) Start Watching', description: 'Enable auto-build on file changes' },
           { label: '$(tools) Build Once', description: 'One-off build without watching' },
           { label: '$(settings-gear) Select Profile', description: 'Choose active profile' },
+          { label: '$(code) Select Format', description: 'Change output format' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(trash) Delete Profile', description: 'Remove a configuration profile' },
           { label: '$(file) Init Configuration', description: 'Create default config file' },
@@ -212,6 +248,7 @@ export function registerCommands(
           { label: '$(sync) Build Now', description: 'Force rebuild immediately' },
           { label: '$(clippy) Copy Output Path', description: 'Copy absolute path to clipboard' },
           { label: '$(arrow-swap) Switch Profile', description: 'Change profile and restart watcher' },
+          { label: '$(code) Select Format', description: 'Change output format' },
           { label: '$(plus) Create Profile', description: 'Add new configuration profile' },
           { label: '$(trash) Delete Profile', description: 'Remove a configuration profile' },
           { label: '$(root-folder) Switch Workspace', description: 'Change monitored workspace folder' },
@@ -240,6 +277,9 @@ export function registerCommands(
         case 'Select Profile':
         case 'Switch Profile':
           vscode.commands.executeCommand('context-builder.selectProfile');
+          break;
+        case 'Select Format':
+          vscode.commands.executeCommand('context-builder.selectFormat');
           break;
         case 'Create Profile':
           vscode.commands.executeCommand('context-builder.createProfile');

@@ -1,12 +1,145 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Profile } from '../types/config';
+import { Profile, OutputFormat } from '../types/config';
 import { BuildStats } from '../types/state';
 import { TokenCounter } from './TokenCounter';
 import { LANGUAGE_MAP } from '../utils/languageMap';
 import { Logger } from '../utils/Logger';
 
 type TreeNode = { [key: string]: TreeNode };
+
+export interface FileData {
+  path: string;
+  content: string;
+  size: number;
+  lang: string;
+}
+
+export interface IContextFormatter {
+  formatHeader(stats: BuildStats, profileName: string): string;
+  formatBody(filesData: FileData[], treePart: string, preamblePart: string, workspaceRoot: string): string;
+  assemble(header: string, body: string): string;
+}
+
+export class MarkdownFormatter implements IContextFormatter {
+  public formatHeader(stats: BuildStats, profileName: string): string {
+    return [
+      `# Project Context: ${profileName}`,
+      `> Generated: ${stats.timestamp.toISOString()}`,
+      `> Files: ${stats.fileCount}`,
+      `> Total Size: ${(stats.totalSizeBytes / 1024).toFixed(1)} KB`,
+      `> Estimated Tokens: ${stats.tokenCount}`,
+    ].join('\n');
+  }
+
+  public formatBody(filesData: FileData[], treePart: string, preamblePart: string, _workspaceRoot: string): string {
+    let body = '';
+    if (preamblePart) {
+      body += `# Preamble\n\n${preamblePart}\n\n`;
+    }
+    if (treePart) {
+      body += '# Project Tree\n\n```\n' + treePart + '```\n\n';
+    }
+    body += '# Processed Files\n\n';
+
+    const fileSections = filesData.map((fd) => {
+      return [
+        `## Path: ${fd.path} (Size: ${(fd.size / 1024).toFixed(1)} KB)`,
+        '',
+        '```' + fd.lang,
+        fd.content,
+        '```',
+      ].join('\n');
+    });
+
+    body += fileSections.join('\n\n');
+    return body;
+  }
+
+  public assemble(header: string, body: string): string {
+    return header + '\n\n' + body;
+  }
+}
+
+export class XmlFormatter implements IContextFormatter {
+  public formatHeader(stats: BuildStats, profileName: string): string {
+    const parts: string[] = [];
+    parts.push(`  <metadata>`);
+    parts.push(`    <profile>${this.escapeXmlText(profileName)}</profile>`);
+    parts.push(`    <generated_at>${stats.timestamp.toISOString()}</generated_at>`);
+    parts.push(
+      `    <stats files="${stats.fileCount}" size="${(stats.totalSizeBytes / 1024).toFixed(1)} KB" tokens="${stats.tokenCount}" />`,
+    );
+    parts.push(`  </metadata>`);
+    return parts.join('\n');
+  }
+
+  public formatBody(filesData: FileData[], treePart: string, preamblePart: string, workspaceRoot: string): string {
+    const parts: string[] = [];
+
+    if (preamblePart) {
+      parts.push(`  <instructions>`);
+      parts.push(`    <![CDATA[\n${this.escapeCdata(preamblePart)}\n    ]]>`);
+      parts.push(`  </instructions>`);
+    }
+
+    if (treePart) {
+      parts.push(`  <file_tree>`);
+      parts.push(`    <![CDATA[\n${this.escapeCdata(treePart)}    ]]>`);
+      parts.push(`  </file_tree>`);
+    }
+
+    parts.push(`  <files>`);
+    parts.push(`    <root path="${this.escapeXmlAttr(workspaceRoot)}">`);
+
+    for (const fd of filesData) {
+      parts.push(
+        `      <file path="${this.escapeXmlAttr(fd.path)}" language="${this.escapeXmlAttr(fd.lang)}" size="${(fd.size / 1024).toFixed(1)} KB">`,
+      );
+      parts.push(`        <![CDATA[\n${this.escapeCdata(fd.content)}\n        ]]>`);
+      parts.push(`      </file>`);
+    }
+
+    parts.push(`    </root>`);
+    parts.push(`  </files>`);
+    return parts.join('\n');
+  }
+
+  public assemble(header: string, body: string): string {
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<project_context>\n${header}\n${body}\n</project_context>`;
+  }
+
+  private escapeXmlText(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  private escapeCdata(text: string): string {
+    return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').replace(/]]>/g, ']]]]><![CDATA[>');
+  }
+
+  private escapeXmlAttr(text: string): string {
+    return text
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+}
+
+export class FormatterFactory {
+  public static getFormatter(format: OutputFormat): IContextFormatter {
+    switch (format) {
+      case 'markdown':
+        return new MarkdownFormatter();
+      case 'xml':
+        return new XmlFormatter();
+      default:
+        throw new Error(`Unsupported output format: ${format satisfies never}`);
+    }
+  }
+}
 
 export class ContextBuilder {
   constructor(
@@ -20,71 +153,55 @@ export class ContextBuilder {
     const startTime = new Date();
     await this.ensureOutputDirectory();
 
-    // 1. Generate content sections
-    const fileSections: string[] = [];
+    const filesData: FileData[] = [];
     let totalSizeBytes = 0;
-    let successfulFiles = 0;
 
     for (const filePath of this.files) {
-      const result = await this.generateFileSection(filePath);
+      const data = await this.readFileData(filePath);
+      if (!data) continue;
 
-      // Graceful handling: skip file if read failed (Task 10.1)
-      if (!result) {
-        continue;
-      }
-
-      fileSections.push(result.content);
-      totalSizeBytes += result.size;
-      successfulFiles++;
+      filesData.push(data);
+      totalSizeBytes += data.size;
     }
 
-    // 2. Build Structural Components
-    // Tree shows all files intended for build, or only successful ones?
-    // Usually only successful ones to match content.
-    // However, keeping original list in tree *might* be misleading if content is missing.
-    // Let's filter the file list for the tree generation to match content.
-    // Since we iterated `this.files`, we don't have the filtered list readily available for generateTree
-    // unless we reconstruct it or filter `this.files` beforehand.
-    // For efficiency, we will proceed with the original list in tree,
-    // OR ideally, we only include what we could read.
-    // Let's stick to simple logic: Tree represents structural intent.
     const treePart = this.profile.options.showFileTree ? this.generateTree(this.files) : '';
-    const preamblePart = this.generatePreamble();
-    const contentPart = fileSections.join('\n\n');
+    const preamblePart = this.profile.options.preamble || '';
 
-    // 3. Assembly for final token count
-    let body = '';
-    if (preamblePart) {
-      body += preamblePart + '\n\n';
+    const format: OutputFormat = this.profile.options.outputFormat;
+    if (!format) {
+      throw new Error('Profile outputFormat is not defined. Check configuration.');
     }
-    if (treePart) {
-      body += '# Project Tree\n\n```\n' + treePart + '```\n\n';
-    }
-    body += '# Processed Files\n\n' + contentPart;
+    const formatter = FormatterFactory.getFormatter(format);
 
-    // 4. Final Stats & Header
-    const tempStats: BuildStats = {
-      fileCount: successfulFiles,
+    const body = formatter.formatBody(filesData, treePart, preamblePart, this.workspaceRoot);
+    let estimatedTokens = this.tokenCounter.count(body);
+    let finalOutput = '';
+
+    for (let i = 0; i < 3; i++) {
+      const tempStats: BuildStats = {
+        fileCount: filesData.length,
+        totalSizeBytes,
+        tokenCount: estimatedTokens,
+        timestamp: startTime,
+      };
+
+      const header = formatter.formatHeader(tempStats, this.profile.name);
+      finalOutput = formatter.assemble(header, body);
+
+      const calculatedTokens = this.tokenCounter.count(finalOutput);
+      if (calculatedTokens === estimatedTokens) {
+        break;
+      }
+      estimatedTokens = calculatedTokens;
+    }
+
+    const finalStats: BuildStats = {
+      fileCount: filesData.length,
       totalSizeBytes,
-      tokenCount: 0, // Calculated below
+      tokenCount: estimatedTokens,
       timestamp: startTime,
     };
 
-    // Calculate approximate tokens including header
-    const headerPlaceholder = this.generateHeader(tempStats);
-    const fullContent = headerPlaceholder + '\n\n' + body;
-    const finalTokenCount = this.tokenCounter.count(fullContent);
-
-    // Update stats with real token count
-    const finalStats: BuildStats = {
-      ...tempStats,
-      tokenCount: finalTokenCount,
-    };
-
-    const finalHeader = this.generateHeader(finalStats);
-    const finalOutput = finalHeader + '\n\n' + body;
-
-    // 5. Write to Disk
     const outputPath = path.join(this.workspaceRoot, this.profile.outputFile);
     await fs.writeFile(outputPath, finalOutput, 'utf-8');
 
@@ -94,23 +211,6 @@ export class ContextBuilder {
   private async ensureOutputDirectory(): Promise<void> {
     const outputDir = path.dirname(path.join(this.workspaceRoot, this.profile.outputFile));
     await fs.mkdir(outputDir, { recursive: true });
-  }
-
-  private generateHeader(stats: BuildStats): string {
-    return [
-      `# Project Context: ${this.profile.name}`,
-      `> Generated: ${stats.timestamp.toISOString()}`,
-      `> Files: ${stats.fileCount}`,
-      `> Total Size: ${(stats.totalSizeBytes / 1024).toFixed(1)} KB`,
-      `> Estimated Tokens: ${stats.tokenCount}`,
-    ].join('\n');
-  }
-
-  private generatePreamble(): string {
-    if (!this.profile.options.preamble) {
-      return '';
-    }
-    return `# Preamble\n\n${this.profile.options.preamble}`;
   }
 
   private generateTree(files: string[]): string {
@@ -157,38 +257,24 @@ export class ContextBuilder {
     return result;
   }
 
-  // Changed return type to allow null on error
-  private async generateFileSection(filePath: string): Promise<{ content: string; size: number } | null> {
+  private async readFileData(filePath: string): Promise<FileData | null> {
     const absPath = path.join(this.workspaceRoot, filePath);
-    let content = '';
-    let size = 0;
-
     try {
-      // 10.1: Graceful handling - check access and read
-      // We rely on fs.readFile throwing if file doesn't exist or is not readable
       const stats = await fs.stat(absPath);
-      size = stats.size;
-      content = await fs.readFile(absPath, 'utf-8');
+      const content = await fs.readFile(absPath, 'utf-8');
+      const ext = path.extname(filePath);
+      const lang = this.getLanguageFromExtension(ext);
+
+      return {
+        path: filePath,
+        content,
+        size: stats.size,
+        lang,
+      };
     } catch (error) {
-      // 10.1: Log error and skip file
       Logger.error(`Failed to read file: ${filePath}`, error);
       return null;
     }
-
-    const ext = path.extname(filePath);
-    const lang = this.getLanguageFromExtension(ext);
-
-    // TODO: Implement comment removal if options.removeComments is true
-
-    const section = [
-      `## Path: ${filePath} (Size: ${(size / 1024).toFixed(1)} KB)`,
-      '',
-      '```' + lang,
-      content,
-      '```',
-    ].join('\n');
-
-    return { content: section, size };
   }
 
   private getLanguageFromExtension(ext: string): string {
